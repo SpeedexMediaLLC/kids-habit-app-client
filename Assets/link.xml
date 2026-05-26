@@ -1,0 +1,48 @@
+<linker>
+  <!-- Supabase SDK 一式 (Assets/Packages/Supabase.* の dll 名と一致) -->
+  <assembly fullname="Supabase">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="Supabase.Core">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="Supabase.Postgrest">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="Supabase.Gotrue">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="Supabase.Realtime">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="Supabase.Storage">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="Supabase.Functions">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- JSON シリアライザ (UPM com.unity.nuget.newtonsoft-json 3.2.2) -->
+  <assembly fullname="Newtonsoft.Json">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- sqlite-net-pcl 本体 + SQLitePCLRaw 一式 (Assets/Packages/ 配下) -->
+  <assembly fullname="SQLite-net">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="SQLitePCLRaw.batteries_v2">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="SQLitePCLRaw.core">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="SQLitePCLRaw.provider.e_sqlite3">
+    <type fullname="*" preserve="all" />
+  </assembly>
+
+  <!-- UniTask (UPM com.cysharp.unitask 2.5.11) -->
+  <assembly fullname="UniTask">
+    <type fullname="*" preserve="all" />
+  </assembly>
+</linker>
