@@ -42,7 +42,7 @@ public class CreatureModel : BaseModel
 
 public class M1Tester : MonoBehaviour
 {
-    private const string DefaultEmail    = "m1tester+a@example.com";
+    private const string DefaultEmail    = "m1tester+a@speedexmedia.com";
     private const string DefaultPassword = "testpass123";
     private const string DefaultFamilyName     = "テスト家A";
     private const string DefaultParentNickname = "とうさんA";
