@@ -64,6 +64,8 @@ public class PressEffectPlayer : MonoBehaviour
 
     private void ConfigureParticleSystem(ParticleSystem ps)
     {
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
         var main = ps.main;
         main.duration = 0.5f;
         main.loop = false;
