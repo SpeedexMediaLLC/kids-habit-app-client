@@ -506,6 +506,7 @@ GameObject:
   m_Component:
   - component: {fileID: 500000001}
   - component: {fileID: 500000002}
+  - component: {fileID: 500000003}
   m_Layer: 0
   m_Name: CreatureRoot
   m_TagString: Untagged
@@ -538,9 +539,29 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0cd03a8fb1684642fbde8c527e66583a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   stage: egg
+--- !u!114 &500000003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 500000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8e249833dc57449fb88a6c38f9e796a3, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  pressEffectPrefab: {fileID: 100000000, guid: 2b5f7a9a558044dda270a9228cf24155, type: 3}
+  effectLifetime: 1
+  shakeDuration: 0.3
+  shakeAmplitude: 0.08
+  shakeFrequencyHz: 14
+  beepFrequency: 660
+  beepDuration: 0.15
+  beepVolume: 0.4
 --- !u!1 &600000000
 GameObject:
   m_ObjectHideFlags: 0
@@ -790,6 +811,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9288681b864e4ecc9064167f7262e5a3, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+  pressEffectPlayer: {fileID: 500000003}
 --- !u!1 &800000000
 GameObject:
   m_ObjectHideFlags: 0
