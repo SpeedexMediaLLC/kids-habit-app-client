@@ -812,6 +812,8 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier:
   pressEffectPlayer: {fileID: 500000003}
+  targetMemberId:
+  habitId:
 --- !u!1 &800000000
 GameObject:
   m_ObjectHideFlags: 0
