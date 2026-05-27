@@ -242,6 +242,15 @@ public class M1Tester : MonoBehaviour
         try
         {
             var session = await AuthService.SignUpAsync(_emailInput.text, _passwordInput.text);
+            // Supabase.Gotrue 6.0.3 の AuthState enum には SignedUp が無く (SignedIn / SignedOut /
+            // TokenRefreshed / UserUpdated / PasswordRecovery のみ)、Auth.SignUp は SignedIn を発火
+            // しないため Postgrest 側の auth header に access_token が反映されない。続けて SignIn を
+            // 呼ぶことで SignedIn イベントが発火し、後続 RPC が authenticated ロールで通る。
+            // M1 §4.6.10 Step C で「Sign Up + Sign In をワンサイクルで完結」と運用化されていた経路を自動化。
+            if (session?.User != null)
+            {
+                session = await AuthService.SignInAsync(_emailInput.text, _passwordInput.text);
+            }
             SetStatus($"Sign Up: ok / user={session?.User?.Id} / aud={session?.User?.Aud}");
         }
         catch (Exception ex)
