@@ -48,11 +48,14 @@ public class M1Tester : MonoBehaviour
     private const string DefaultParentNickname = "とうさんA";
     private const string DefaultChildNickname  = "たろうA";
     private const string DefaultPasscode       = "123456";
+    private const string DefaultNewPasscode    = "654321";
     private const string ConsentVersion        = "v1";
 
     private Text _statusText;
     private InputField _emailInput;
     private InputField _passwordInput;
+    private InputField _passcodeInput;
+    private InputField _newPasscodeInput;
     private Font _font;
 
     // CreateFamily の結果からキャッシュ. 以降のボタンで使い回す.
@@ -60,6 +63,7 @@ public class M1Tester : MonoBehaviour
     private Guid? _parentMemberId;
     private Guid? _childMemberId;
     private Guid? _firstHabitId;
+    private Guid? _deletionRequestId;  // Request Account Deletion の戻り値からキャッシュ. Cancel で使用.
 
     private async void Awake()
     {
@@ -124,6 +128,15 @@ public class M1Tester : MonoBehaviour
         CreateButton(panel, "Record Habit",           () => OnRecordHabit().Forget());
         CreateButton(panel, "Try Direct Stage UPDATE", () => OnTryDirectStageUpdate().Forget());
         CreateButton(panel, "Sign Out",               () => OnSignOut().Forget());
+
+        // ---- passcode 系 + 削除予約フロー (M1 完了条件の検証用ボタン群) ----
+        _passcodeInput    = CreateInputField(panel, "passcode_current", DefaultPasscode);
+        _newPasscodeInput = CreateInputField(panel, "passcode_new",     DefaultNewPasscode);
+
+        CreateButton(panel, "Verify Passcode",          () => OnVerifyPasscode().Forget());
+        CreateButton(panel, "Change Passcode",          () => OnChangePasscode().Forget());
+        CreateButton(panel, "Request Account Deletion", () => OnRequestAccountDeletion().Forget());
+        CreateButton(panel, "Cancel Account Deletion",  () => OnCancelAccountDeletion().Forget());
 
         _statusText = CreateStatusText(panel);
     }
@@ -374,6 +387,67 @@ public class M1Tester : MonoBehaviour
         catch (Exception ex)
         {
             SetStatus("Sign Out: error / " + ex.Message);
+        }
+    }
+
+    private async UniTask OnVerifyPasscode()
+    {
+        try
+        {
+            var result = await ApiService.VerifyPasscodeAsync(_passcodeInput.text);
+            Report("Verify Passcode", result);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Verify Passcode: error / " + ex.Message);
+        }
+    }
+
+    private async UniTask OnChangePasscode()
+    {
+        try
+        {
+            var result = await ApiService.ChangePasscodeAsync(_passcodeInput.text, _newPasscodeInput.text);
+            Report("Change Passcode", result);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Change Passcode: error / " + ex.Message);
+        }
+    }
+
+    private async UniTask OnRequestAccountDeletion()
+    {
+        try
+        {
+            var result = await ApiService.RequestAccountDeletionAsync();
+            if (result.ResultCode == "requested" || result.ResultCode == "already_pending")
+            {
+                _deletionRequestId = ParseGuid(result.Raw, "deletion_request_id");
+            }
+            Report("Request Account Deletion", result);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Request Account Deletion: error / " + ex.Message);
+        }
+    }
+
+    private async UniTask OnCancelAccountDeletion()
+    {
+        if (!_deletionRequestId.HasValue)
+        {
+            SetStatus("Cancel Account Deletion: deletion_request_id 未取得. 先に Request Account Deletion を実行.");
+            return;
+        }
+        try
+        {
+            var result = await ApiService.CancelAccountDeletionAsync(_deletionRequestId.Value);
+            Report("Cancel Account Deletion", result);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Cancel Account Deletion: error / " + ex.Message);
         }
     }
 
