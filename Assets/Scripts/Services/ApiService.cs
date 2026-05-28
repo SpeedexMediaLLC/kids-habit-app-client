@@ -119,6 +119,14 @@ public static class ApiService
 
     private static async UniTask<RpcResult> CallAsync(string procedureName, object parameters)
     {
+        // RuntimeInitializeOnLoadMethod による自動初期化が走っていない / まだ完了
+        // していない経路 (シーン単独起動・初回 RPC が早すぎる場合等) でも確実に
+        // 認証付き Client が用意されるよう、毎回 InitializeAsync を await する。
+        // IsInitialized なら即返、進行中なら同じ UniTask が共有される (single-flight)。
+        if (!SupabaseService.IsInitialized)
+        {
+            await SupabaseService.InitializeAsync();
+        }
         var response = await SupabaseService.Client.Rpc(procedureName, parameters);
         var content = response?.Content ?? "";
         JObject json;
