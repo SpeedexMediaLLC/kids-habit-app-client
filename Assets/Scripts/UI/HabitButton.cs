@@ -6,6 +6,7 @@ using UnityEngine;
 public class HabitButton : MonoBehaviour
 {
     [SerializeField] private PressEffectPlayer pressEffectPlayer;
+    [SerializeField] private CreatureDisplay creatureDisplay;
     [SerializeField] private string targetMemberId;
     [SerializeField] private string habitId;
 
@@ -53,6 +54,23 @@ public class HabitButton : MonoBehaviour
                 $"growth_points_delta={growthDelta} total_growth_points={totalGrowth} " +
                 $"new_stage='{newStage}' stage_changed={stageChanged} " +
                 $"client_event_id={clientEventId}");
+
+            // Step 7: stage_changed=true なら CreatureDisplay に切替を依頼。
+            // Trigger 選択 (Stage_Up vs Stage_Up_To_Grown) は CreatureDisplay.SetStage 内で隠蔽。
+            if (stageChanged == "true"
+                && !string.IsNullOrEmpty(newStage) && newStage != "null")
+            {
+                if (creatureDisplay != null)
+                {
+                    creatureDisplay.SetStage(newStage);
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        "[HabitButton] stage_changed=true but creatureDisplay reference is null; " +
+                        "visual switch skipped. MainScene の Inspector で CreatureRoot を割当て要");
+                }
+            }
         }
         catch (Exception ex)
         {
