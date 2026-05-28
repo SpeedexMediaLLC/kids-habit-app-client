@@ -27,7 +27,12 @@ public static class SessionPersistence
 
     public static void Save(string accessToken, string refreshToken)
     {
-        if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(refreshToken)) return;
+        Debug.Log($"[SessionPersistence] Save begin path={FilePath} at_len={accessToken?.Length ?? -1} rt_len={refreshToken?.Length ?? -1}");
+        if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(refreshToken))
+        {
+            Debug.Log("[SessionPersistence] Save skipped: empty tokens");
+            return;
+        }
         try
         {
             var json = JsonUtility.ToJson(new Snapshot
@@ -36,44 +41,61 @@ public static class SessionPersistence
                 refresh_token = refreshToken,
             });
             File.WriteAllText(FilePath, json);
+            Debug.Log("[SessionPersistence] Save ok");
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[SessionPersistence] Save failed: {ex.Message}");
+            Debug.LogError($"[SessionPersistence] Save failed: {ex.ToString()}");
         }
     }
 
     public static (string AccessToken, string RefreshToken)? Load()
     {
+        Debug.Log($"[SessionPersistence] Load begin path={FilePath}");
         try
         {
-            if (!File.Exists(FilePath)) return null;
+            if (!File.Exists(FilePath))
+            {
+                Debug.Log("[SessionPersistence] Load: file_not_exists");
+                return null;
+            }
             var json = File.ReadAllText(FilePath);
             var snap = JsonUtility.FromJson<Snapshot>(json);
             if (snap == null
                 || string.IsNullOrEmpty(snap.access_token)
                 || string.IsNullOrEmpty(snap.refresh_token))
             {
+                Debug.Log("[SessionPersistence] Load: file_exists_but_empty_or_invalid");
                 return null;
             }
+            Debug.Log($"[SessionPersistence] Load ok at_len={snap.access_token.Length} rt_len={snap.refresh_token.Length}");
             return (snap.access_token, snap.refresh_token);
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[SessionPersistence] Load failed: {ex.Message}");
+            Debug.LogError($"[SessionPersistence] Load failed: {ex.ToString()}");
             return null;
         }
     }
 
     public static void Clear()
     {
+        Debug.Log($"[SessionPersistence] Clear begin path={FilePath}");
         try
         {
-            if (File.Exists(FilePath)) File.Delete(FilePath);
+            if (File.Exists(FilePath))
+            {
+                File.Delete(FilePath);
+                Debug.Log("[SessionPersistence] Clear ok (file deleted)");
+            }
+            else
+            {
+                Debug.Log("[SessionPersistence] Clear: file_not_exists (noop)");
+            }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[SessionPersistence] Clear failed: {ex.Message}");
+            Debug.LogError($"[SessionPersistence] Clear failed: {ex.ToString()}");
         }
     }
 }

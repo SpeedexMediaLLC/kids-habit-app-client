@@ -56,7 +56,7 @@ public class HabitButton : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[HabitButton] record_habit RPC failed: {ex.Message}");
+            Debug.LogError($"[HabitButton] record_habit RPC failed: {ex.ToString()}");
         }
     }
 

@@ -37,53 +37,86 @@ public static class SupabaseService
 
     public static UniTask InitializeAsync()
     {
-        if (IsInitialized) return UniTask.CompletedTask;
-        if (_initTask.HasValue) return _initTask.Value;
+        if (IsInitialized)
+        {
+            Debug.Log("[SupabaseService] InitializeAsync called: already initialized (immediate return)");
+            return UniTask.CompletedTask;
+        }
+        if (_initTask.HasValue)
+        {
+            // 既に init が進行中 / もしくは faulted で固まっている場合、同じ UniTask を返す。
+            // 後段の "init complete" が出ない経路で同じ呼び出しが繰り返されるなら、
+            // init が完了せず張り付いているサインになる。
+            Debug.Log("[SupabaseService] InitializeAsync called: returning cached _initTask (await existing in-flight init; if 'init complete' never appears below, the cached task is stuck or faulted)");
+            return _initTask.Value;
+        }
+        Debug.Log("[SupabaseService] InitializeAsync called: starting new init task");
         _initTask = DoInitializeAsync();
         return _initTask.Value;
     }
 
     private static async UniTask DoInitializeAsync()
     {
-        var config = Resources.Load<SupabaseConfig>("SupabaseConfig");
-        if (config == null)
+        try
         {
-            throw new InvalidOperationException(
-                "SupabaseConfig.asset not found under Assets/Resources/. Step 5 で作成済みのはず.");
-        }
-        if (string.IsNullOrEmpty(config.Url) || string.IsNullOrEmpty(config.AnonKey))
-        {
-            throw new InvalidOperationException(
-                "SupabaseConfig.Url / AnonKey が空. Resources/SupabaseConfig.asset を確認.");
-        }
+            Debug.Log("[SupabaseService] init begin");
 
-        var options = new Supabase.SupabaseOptions
-        {
-            AutoConnectRealtime = false,
-            AutoRefreshToken = true,
-        };
-
-        Client = new Supabase.Client(config.Url, config.AnonKey, options);
-        await Client.InitializeAsync();
-
-        Client.Auth.AddStateChangedListener(OnAuthStateChanged);
-
-        var saved = SessionPersistence.Load();
-        if (saved.HasValue)
-        {
-            try
+            var config = Resources.Load<SupabaseConfig>("SupabaseConfig");
+            if (config == null)
             {
-                await Client.Auth.SetSession(saved.Value.AccessToken, saved.Value.RefreshToken);
+                throw new InvalidOperationException(
+                    "SupabaseConfig.asset not found under Assets/Resources/. Step 5 で作成済みのはず.");
             }
-            catch (Exception ex)
+            if (string.IsNullOrEmpty(config.Url) || string.IsNullOrEmpty(config.AnonKey))
             {
-                Debug.LogWarning(
-                    $"[SupabaseService] saved session restore failed (cleared): {ex.Message}");
-                SessionPersistence.Clear();
+                throw new InvalidOperationException(
+                    "SupabaseConfig.Url / AnonKey が空. Resources/SupabaseConfig.asset を確認.");
             }
-        }
+            Debug.Log($"[SupabaseService] config loaded url={config.Url}");
 
-        IsInitialized = true;
+            var options = new Supabase.SupabaseOptions
+            {
+                AutoConnectRealtime = false,
+                AutoRefreshToken = true,
+            };
+
+            Client = new Supabase.Client(config.Url, config.AnonKey, options);
+            Debug.Log("[SupabaseService] client created");
+
+            Debug.Log("[SupabaseService] Client.InitializeAsync begin");
+            await Client.InitializeAsync();
+            Debug.Log("[SupabaseService] Client.InitializeAsync done");
+
+            Client.Auth.AddStateChangedListener(OnAuthStateChanged);
+            Debug.Log("[SupabaseService] auth state listener attached");
+
+            var saved = SessionPersistence.Load();
+            Debug.Log($"[SupabaseService] session restore: file_exists={saved.HasValue}");
+            if (saved.HasValue)
+            {
+                try
+                {
+                    Debug.Log("[SupabaseService] SetSession begin");
+                    var session = await Client.Auth.SetSession(
+                        saved.Value.AccessToken, saved.Value.RefreshToken);
+                    Debug.Log($"[SupabaseService] SetSession ok / session.user.id={session?.User?.Id}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError(
+                        $"[SupabaseService] saved session restore failed (cleared): {ex.ToString()}");
+                    SessionPersistence.Clear();
+                }
+            }
+
+            IsInitialized = true;
+            Debug.Log("[SupabaseService] init complete");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[SupabaseService] init failed: {ex.ToString()}");
+            throw;
+        }
     }
 
     private static void OnAuthStateChanged(IGotrueClient<User, Session> sender,
