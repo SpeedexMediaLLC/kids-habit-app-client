@@ -134,8 +134,10 @@ public static class ApiService
 
         UnityEngine.Debug.Log($"[ApiService] Client.Rpc begin function={procedureName}");
         var response = await SupabaseService.Client.Rpc(procedureName, parameters);
+        // BaseResponse には StatusCode プロパティが直接無いため ResponseMessage 経由で取得。
+        // HttpResponseMessage が null の場合 (応答自体無し) も視覚化できるよう "null" 表示にする。
         UnityEngine.Debug.Log(
-            $"[ApiService] Client.Rpc returned status={response?.StatusCode} " +
+            $"[ApiService] Client.Rpc returned status={response?.ResponseMessage?.StatusCode.ToString() ?? "null"} " +
             $"content_len={response?.Content?.Length ?? -1}");
 
         var content = response?.Content ?? "";
