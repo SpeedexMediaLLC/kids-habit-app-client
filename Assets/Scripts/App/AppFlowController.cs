@@ -33,6 +33,11 @@ public class AppFlowController : MonoBehaviour
     // 多重生成防止 (Play 中に再入しないためのガード).
     private static bool _bootstrapped;
 
+    // ModeSwitcher (MainScene 常駐) からパスコードゲートを開くための参照.
+    // MainScene 起動時に自己ブートストラップされる本コンポーネントは 1 つだけ存在する
+    // (GameStateService.Instance と同型).
+    public static AppFlowController Instance { get; private set; }
+
     private Font _font;
     private GameObject _loginPanel;
     private GameObject _onboardingPanel;
@@ -40,6 +45,8 @@ public class AppFlowController : MonoBehaviour
     private HomePanel _homePanelComponent;
     private GameObject _settingsPanel;
     private SettingsPanel _settingsPanelComponent;
+    private GameObject _passcodeGatePanel;
+    private PasscodeGatePanel _passcodeGatePanelComponent;
     private GameObject _statusBar;
     private Text _statusText;
     private AppScreen _currentScreen;
@@ -68,6 +75,7 @@ public class AppFlowController : MonoBehaviour
 
     private void Awake()
     {
+        Instance = this;
         _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         if (_font == null)
         {
@@ -83,6 +91,10 @@ public class AppFlowController : MonoBehaviour
         {
             _subscribedGameState.ModeChanged -= OnGameModeChanged;
             _subscribedGameState = null;
+        }
+        if (Instance == this)
+        {
+            Instance = null;
         }
         // 次回 Play で再生成できるようにガードを解除.
         _bootstrapped = false;
@@ -262,6 +274,20 @@ public class AppFlowController : MonoBehaviour
         }
     }
 
+    // パスコード照合ゲート (M4 S2): 子供モードの「おとなにもどる」から ModeSwitcher 経由で呼ばれる.
+    // ゲートを前面表示し, 照合成功時のみ PasscodeGatePanel が SwitchToAdult を実行する.
+    public void RequestAdultUnlock()
+    {
+        if (_passcodeGatePanel == null || _passcodeGatePanelComponent == null)
+        {
+            Debug.LogWarning("[AppFlowController] RequestAdultUnlock ignored (gate panel missing)");
+            return;
+        }
+        _passcodeGatePanel.SetActive(true);
+        _passcodeGatePanelComponent.Begin();
+        Debug.Log("[AppFlowController] passcode gate opened");
+    }
+
     private void SetStatus(string s)
     {
         if (_statusText != null)
@@ -322,6 +348,13 @@ public class AppFlowController : MonoBehaviour
         _settingsPanelComponent = _settingsPanel.AddComponent<SettingsPanel>();
         _settingsPanelComponent.Initialize(this, _font);
         _settingsPanel.SetActive(false);
+
+        // Passcode gate (M4 S2): 子供→大人 復帰時の照合オーバーレイ. 最後に生成して最前面に置き
+        // (Settings・背後の M2 キャラ画面より前面に出す), 照合成功時のみ SwitchToAdult する.
+        _passcodeGatePanel = CreateBarePanel(canvasGO, "PasscodeGatePanel", new Color(0.06f, 0.08f, 0.16f, 1f));
+        _passcodeGatePanelComponent = _passcodeGatePanel.AddComponent<PasscodeGatePanel>();
+        _passcodeGatePanelComponent.Initialize(this, _font);
+        _passcodeGatePanel.SetActive(false);
     }
 
     // ラベルなしの全画面背景パネル (中身は LoginPanel / OnboardingPanel が後から生成する).

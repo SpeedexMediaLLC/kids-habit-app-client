@@ -60,7 +60,8 @@ public class GameStateService : MonoBehaviour
 
     public void SwitchToAdult()
     {
-        // M2 範囲: パスコード照合なし、状態切替のみ (M4 でパスコード本体実装)
+        // 状態切替のみ. パスコード照合は呼び出し側 (M4 S2: PasscodeGatePanel) が担い,
+        // このメソッドは照合成功後にのみ呼ばれる前提.
         if (CurrentMode == GameMode.Adult)
         {
             return;

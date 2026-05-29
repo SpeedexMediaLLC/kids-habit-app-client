@@ -40,7 +40,16 @@ public class ModeSwitcher : MonoBehaviour
 
     public void OnSwitchToAdult()
     {
-        // M2 範囲: パスコード入力 UI は M4 で追加、ここでは即時遷移のみ
+        // M4 S2: 大人モード復帰はパスコード照合を通す. 照合ゲート (AppFlowController) を開き,
+        // 照合成功時のみ PasscodeGatePanel が SwitchToAdult を実行する.
+        // AppFlowController が無い検証用シーン (TestM1Scene 等, 家族/パスコード不在) では
+        // 従来どおり即時遷移にフォールバックする.
+        var flow = AppFlowController.Instance;
+        if (flow != null)
+        {
+            flow.RequestAdultUnlock();
+            return;
+        }
         var service = ResolveService();
         if (service == null)
         {
