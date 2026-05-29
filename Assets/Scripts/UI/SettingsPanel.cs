@@ -511,6 +511,78 @@ public class SettingsPanel : MonoBehaviour
         }
     }
 
+    // ---------- アカウント削除 (M4 S4) ----------
+
+    // 削除申請の確認ダイアログ. 申請すると families.deletion_pending=true + 14 日後予約 (それまで取り消し可).
+    private void OnDeleteAccountClicked()
+    {
+        var box = BeginDialog("アカウントを削除");
+        CreateLine(box, "アカウントとすべてのデータを削除します。\n申請から14日後に完全に削除されます。\nそれまでは取り消せます。",
+            26, Color.white);
+        _dialogMessage = CreateLine(box, "", 24, new Color(1f, 0.9f, 0.6f));
+        CreateButton(box, "削除を申請する", new Color(0.60f, 0.25f, 0.25f), OnConfirmDeleteAccount);
+        CreateButton(box, "やめる", new Color(0.45f, 0.45f, 0.50f), CloseDialog);
+    }
+
+    private void OnConfirmDeleteAccount()
+    {
+        if (_busy) return;
+        RunDeletionRequestAsync().Forget();
+    }
+
+    // request_account_deletion → 成功 (requested / already_pending) は削除予約中画面へ遷移する.
+    // 習慣 CRUD の RunMutationAsync とは成功後の挙動が異なる (一覧更新でなく画面遷移) ため別メソッド.
+    // requested 応答の deletion_request_id / scheduled_delete_at は使わない (予約中画面が自前 SELECT で
+    // id と残り日数を取得する). deletion_pending は本 RPC は返さない (0014: 自前で already_pending を返す).
+    private async UniTask RunDeletionRequestAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        SetDialogInteractable(false);
+        SetDialogMessage("申請中...");
+        try
+        {
+            var result = await ApiService.RequestAccountDeletionAsync();
+            var rc = result.ResultCode;
+            if (rc == "requested" || rc == "already_pending")
+            {
+                // 設定/ダイアログを閉じ削除予約中画面へ (起動時もそこへルーティングされる).
+                CloseDialog();
+                if (_appFlow != null) _appFlow.GoToDeletionReserved();
+                return;
+            }
+
+            // 以降はダイアログを開いたまま固定文言で再試行させる. 生応答は Console のみ.
+            string msg;
+            switch (rc)
+            {
+                case "not_authorized":
+                    msg = "この操作は保護者のみ可能です";
+                    break;
+                default:
+                    Debug.LogWarning($"[SettingsPanel] unexpected result_code='{rc}' (request_account_deletion)");
+                    msg = "通信エラーが発生しました。もう一度お試しください";
+                    break;
+            }
+            SetDialogMessage(msg);
+        }
+        catch (Exception ex)
+        {
+            // 例外メッセージ (サーバ応答の生 JSON 等) は Console のみ. 画面は固定文言.
+            Debug.LogWarning($"[SettingsPanel] deletion request failed: {ex}");
+            SetDialogMessage("通信エラーが発生しました。もう一度お試しください");
+        }
+        finally
+        {
+            // requested / already_pending は return 済 (画面遷移済). それ以外は再試行できるよう戻す.
+            if (_busy)
+            {
+                _busy = false;
+                SetDialogInteractable(true);
+            }
+        }
+    }
+
     // ---------- RPC 実行 + 結果コード分岐 (3 RPC 共通) ----------
 
     private async UniTask RunMutationAsync(UniTask<ApiService.RpcResult> call,
@@ -712,6 +784,10 @@ public class SettingsPanel : MonoBehaviour
         CreateButton(column, "パスコードを変更", new Color(0.20f, 0.45f, 0.70f), OnChangePasscodeClicked);
         CreateButton(column, "パスコードを忘れた場合（再ログイン）",
             new Color(0.45f, 0.45f, 0.50f), OnForgotPasscodeClicked);
+
+        // アカウント (M4 S4): 家族アカウントの削除申請. 申請後は 14 日猶予で取り消し可能 (計画 :683,:687).
+        CreateSubheader(column, "アカウント");
+        CreateButton(column, "アカウントを削除", new Color(0.60f, 0.25f, 0.25f), OnDeleteAccountClicked);
 
         // ステータス
         _statusText = CreateLine(column, "", 24, new Color(1f, 0.9f, 0.6f));

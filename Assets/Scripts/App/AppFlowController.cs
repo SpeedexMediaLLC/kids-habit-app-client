@@ -26,7 +26,7 @@ using UnityEngine.UI;
 
 public class AppFlowController : MonoBehaviour
 {
-    public enum AppScreen { Login, Onboarding, Home }
+    public enum AppScreen { Login, Onboarding, Home, DeletionReserved }
 
     private const string MainSceneName = "MainScene";
 
@@ -43,6 +43,8 @@ public class AppFlowController : MonoBehaviour
     private GameObject _onboardingPanel;
     private GameObject _homePanel;
     private HomePanel _homePanelComponent;
+    private GameObject _deletionReservedPanel;
+    private DeletionReservedPanel _deletionReservedPanelComponent;
     private GameObject _settingsPanel;
     private SettingsPanel _settingsPanelComponent;
     private GameObject _passcodeGatePanel;
@@ -176,14 +178,28 @@ public class AppFlowController : MonoBehaviour
             return AppScreen.Login;
         }
 
-        // ② セッション有 → members 件数で分岐 (RLS で自家族 + deletion_pending=false にスコープ)
-        //    1 件以上 = 家族あり → Home / 0 件 = 家族なし → Onboarding
+        // ② 削除予約中を最優先で判定する (members の可視性に依存しない).
+        //    当初は「members_select(0010:39-44) が pending 中 0 件 → count==0 のときだけ probe」設計だったが,
+        //    ゲート関数 is_family_pending_deletion(0001:53-63) が SECURITY INVOKER で families を読むため
+        //    families_select(0010:26-31, deletion_pending=false) に阻まれ自家族の pending を検知できず
+        //    COALESCE(NULL,false)=false を返し, members が予約中も見えてしまう (Editor 実測). そこで members
+        //    より先に deletion_requests を引く. このテーブルの SELECT(0010:196-198) は同ゲートを持たず
+        //    family_id() のみでスコープするため予約中も確実に読める (family_id() は JWT 由来 0001:16-25).
+        //    probe 失敗時は HasPendingDeletionAsync が false を返し ③ にフォールバックする (members と同一
+        //    エンドポイント・同一 JWT のため probe だけ失敗はほぼ無く, 両方失敗なら ③ の catch で Login).
+        if (await HasPendingDeletionAsync())
+        {
+            Debug.Log("[AppFlowController] route: pending deletion found -> DeletionReserved");
+            return AppScreen.DeletionReserved;
+        }
+
+        // ③ pending 無し → members 件数で分岐. 1 件以上 = 家族あり → Home / 0 件 = 家族なし → Onboarding.
         try
         {
             var resp = await SupabaseService.Client.From<MemberModel>().Get();
             int count = resp?.Models?.Count ?? 0;
             var dst = count > 0 ? AppScreen.Home : AppScreen.Onboarding;
-            Debug.Log($"[AppFlowController] route: session ok, members count={count} -> {dst}");
+            Debug.Log($"[AppFlowController] route: session ok, no pending, members count={count} -> {dst}");
             return dst;
         }
         catch (Exception ex)
@@ -195,6 +211,31 @@ public class AppFlowController : MonoBehaviour
         }
     }
 
+    // 削除予約中か (deletion_requests に status='pending' の行があるか) を判定する.
+    // RLS が自家族 (family_id() = JWT 由来) にスコープし, 予約中も SELECT 可なので予約中の検知に使える.
+    // 全件取得して C# 側で status を見る (Phase 1 は少件数. cancelled/executed の履歴も混ざるため絞る).
+    private async UniTask<bool> HasPendingDeletionAsync()
+    {
+        try
+        {
+            var resp = await SupabaseService.Client.From<DeletionRequestModel>().Get();
+            var models = resp?.Models;
+            if (models == null) return false;
+            foreach (var r in models)
+            {
+                if (r.Status == "pending") return true;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            // 取得失敗時は予約中と断定せず false (起動を止めない). members が取れて本クエリだけ落ちるのは
+            // 同一エンドポイント・同一認証のため稀. ログのみ残す.
+            Debug.LogWarning($"[AppFlowController] deletion_requests probe failed: {ex.Message}");
+            return false;
+        }
+    }
+
     // ---------- 表示制御 ----------
 
     private void Show(AppScreen screen, string overrideMessage)
@@ -203,11 +244,17 @@ public class AppFlowController : MonoBehaviour
         if (_loginPanel != null) _loginPanel.SetActive(screen == AppScreen.Login);
         if (_onboardingPanel != null) _onboardingPanel.SetActive(screen == AppScreen.Onboarding);
         if (_homePanel != null) _homePanel.SetActive(screen == AppScreen.Home);
+        if (_deletionReservedPanel != null) _deletionReservedPanel.SetActive(screen == AppScreen.DeletionReserved);
 
         // Home 表示時にデータ再取得 (メンバー/creature/habit/サマリー).
         if (screen == AppScreen.Home && _homePanelComponent != null)
         {
             _homePanelComponent.Refresh();
+        }
+        // 削除予約中画面は表示のたびに残り日数 + キャンセル対象 id を読み直す (HomePanel と同方式).
+        if (screen == AppScreen.DeletionReserved && _deletionReservedPanelComponent != null)
+        {
+            _deletionReservedPanelComponent.Load();
         }
 
         string msg = overrideMessage ?? $"分岐結果: {screen}";
@@ -278,6 +325,16 @@ public class AppFlowController : MonoBehaviour
         {
             _homePanelComponent.Refresh();
         }
+    }
+
+    // 削除申請成功後の遷移 (M4 S4): SettingsPanel が requested/already_pending で呼ぶ.
+    // 設定・ゲートのオーバーレイを閉じてから削除予約中画面を最上位に出す (Show が Load を呼び残り日数を表示).
+    // 起動経路は DecideScreenAsync が直接 DeletionReserved を返すためこの API は通らない.
+    public void GoToDeletionReserved()
+    {
+        if (_settingsPanel != null) _settingsPanel.SetActive(false);
+        if (_passcodeGatePanel != null) _passcodeGatePanel.SetActive(false);
+        Show(AppScreen.DeletionReserved, "アカウント削除を申請しました");
     }
 
     // パスコード再設定導線 (M4 S3, 判断①): 設定の「パスコードを忘れた場合」から呼ばれる.
@@ -369,9 +426,17 @@ public class AppFlowController : MonoBehaviour
         _homePanelComponent = _homePanel.AddComponent<HomePanel>();
         _homePanelComponent.Initialize(this, _font);
 
+        // DeletionReserved (M4 S4): deletion_pending な family の起動先 + 申請後の遷移先. Login/Onboarding/Home と
+        // 排他の最上位画面. 不透明全画面 (alpha=1) で背後 M2 (ToChildButton 含む) を覆い raycast を遮断する
+        // = 「削除を取り消す」以外をブロック (計画 :768-769. MainScene 非編集).
+        _deletionReservedPanel = CreateBarePanel(canvasGO, "DeletionReservedPanel", new Color(0.16f, 0.10f, 0.12f, 1f));
+        _deletionReservedPanelComponent = _deletionReservedPanel.AddComponent<DeletionReservedPanel>();
+        _deletionReservedPanelComponent.Initialize(this, _font);
+
         _loginPanel.SetActive(false);
         _onboardingPanel.SetActive(false);
         _homePanel.SetActive(false);
+        _deletionReservedPanel.SetActive(false);
 
         _statusText = CreateStatusText(canvasGO);
 
