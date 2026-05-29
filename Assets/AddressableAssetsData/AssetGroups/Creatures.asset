@@ -35,6 +35,26 @@ MonoBehaviour:
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 664b049a72ca4e5296d89a4936edd2db
+    m_Address: creature_v1_egg_mat
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 3c9d16cf497849db8c439fe9db5da6f2
+    m_Address: creature_v1_baby_mat
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: bf9ac5b3e5c64602967e11dab51e1979
+    m_Address: creature_v1_child_mat
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: bbaa2315f8844aa58487b9e107e5f785
+    m_Address: creature_v1_grown_mat
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
   m_ReadOnly: 0
   m_Settings: {fileID: 11400000, guid: 064cd10d07e19384384611a14767f36e, type: 2}
   m_SchemaSet:
