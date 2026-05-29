@@ -74,6 +74,14 @@ public class SettingsPanel : MonoBehaviour
     private static readonly Color PickOn = new Color(0.25f, 0.55f, 0.85f);
     private static readonly Color PickOff = new Color(0.30f, 0.30f, 0.35f);
 
+    // ---- 規約・プライバシー (M4 S5) のリンク先 URL ----
+    // 未公開 (STORE_FAMILY_CHECKLIST.md:121-122 ⬜) のため, 現状は Application.OpenURL を呼ばず
+    // 押下時に「公開準備中」を表示するのみ (推奨A). M7 で実 URL を入れて OnOpenTerms / OnOpenPrivacy を
+    // OpenURL 呼び出しへ 1 行差し替える. (外部ブラウザ起動 API はこの段階では導入しない =
+    // 「子供モード 外部URL ゼロ」検証も自明に維持: STORE_FAMILY_CHECKLIST.md:25.)
+    private const string TermsUrlPlaceholder = "（M7で公開予定）";
+    private const string PrivacyUrlPlaceholder = "（M7で公開予定）";
+
     public void Initialize(AppFlowController appFlow, Font font)
     {
         _appFlow = appFlow;
@@ -583,6 +591,24 @@ public class SettingsPanel : MonoBehaviour
         }
     }
 
+    // ---------- 規約・プライバシー (M4 S5) ----------
+
+    // 規約 / プライバシーポリシーのリンク. リンク先 URL は M7 公開予定の仮置き (計画 :685 「URL 仮置き、
+    // 文面は実装外」/ STORE_FAMILY_CHECKLIST.md:121-122 ⬜) のため, 現状は Application.OpenURL を呼ばず
+    // ステータスに「公開準備中」を出すのみ (推奨A). M7 で実 URL 公開後は SetStatus を
+    // Application.OpenURL(TermsUrlPlaceholder) / (PrivacyUrlPlaceholder) へ 1 行差し替える.
+    private void OnOpenTerms()
+    {
+        Debug.Log($"[SettingsPanel] 利用規約リンク tapped (placeholder={TermsUrlPlaceholder})");
+        SetStatus("公開準備中です");
+    }
+
+    private void OnOpenPrivacy()
+    {
+        Debug.Log($"[SettingsPanel] プライバシーポリシーリンク tapped (placeholder={PrivacyUrlPlaceholder})");
+        SetStatus("公開準備中です");
+    }
+
     // ---------- RPC 実行 + 結果コード分岐 (3 RPC 共通) ----------
 
     private async UniTask RunMutationAsync(UniTask<ApiService.RpcResult> call,
@@ -784,6 +810,20 @@ public class SettingsPanel : MonoBehaviour
         CreateButton(column, "パスコードを変更", new Color(0.20f, 0.45f, 0.70f), OnChangePasscodeClicked);
         CreateButton(column, "パスコードを忘れた場合（再ログイン）",
             new Color(0.45f, 0.45f, 0.50f), OnForgotPasscodeClicked);
+
+        // 規約・プライバシー (M4 S5): データ最小化注記 (計画 :426,:443,:684) + 規約/PP リンク (計画 :427,:685).
+        // 大人モード専用 = AppFlowController.OpenSettings が Adult+Home 限定 (:295-305), 子供モードで設定非表示
+        // (:127-132) のため子供画面から到達不可 (Codex指摘4.5 / CONSENT_TEXTS.md:96 / STORE_FAMILY_CHECKLIST.md:25-26).
+        // 注記文言は OnboardingPanel.cs:34-35 を踏襲 (SoT: server docs/CONSENT_TEXTS.md v1 :41-51). リンクは
+        // URL 仮置き・文面は実装外 (:685) のため OpenURL は呼ばず, 押下で「公開準備中」を出すのみ (推奨A).
+        CreateSubheader(column, "規約・プライバシー");
+        CreateLine(column, "このアプリが集めないもの：お子さまの本名・年齢、写真、位置情報、連絡先、広告識別子。",
+            24, new Color(0.85f, 0.85f, 0.85f));
+        CreateLine(column, "データの送信先：当社が管理するサーバー（東京）のみ。第三者の分析・広告には送りません。",
+            24, new Color(0.85f, 0.85f, 0.85f));
+        CreateButton(column, "利用規約", new Color(0.45f, 0.45f, 0.50f), OnOpenTerms);
+        CreateButton(column, "プライバシーポリシー", new Color(0.45f, 0.45f, 0.50f), OnOpenPrivacy);
+        CreateLine(column, "※リンク先は公開準備中です", 22, new Color(0.7f, 0.7f, 0.7f));
 
         // アカウント (M4 S4): 家族アカウントの削除申請. 申請後は 14 日猶予で取り消し可能 (計画 :683,:687).
         CreateSubheader(column, "アカウント");
