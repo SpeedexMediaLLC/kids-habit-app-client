@@ -38,6 +38,8 @@ public class AppFlowController : MonoBehaviour
     private GameObject _onboardingPanel;
     private GameObject _homePanel;
     private HomePanel _homePanelComponent;
+    private GameObject _settingsPanel;
+    private SettingsPanel _settingsPanelComponent;
     private GameObject _statusBar;
     private Text _statusText;
     private AppScreen _currentScreen;
@@ -112,6 +114,8 @@ public class AppFlowController : MonoBehaviour
         {
             if (_homePanel != null) _homePanel.SetActive(false);
             if (_statusBar != null) _statusBar.SetActive(false);
+            // 設定は大人モード専用. 子供モードに渡る際は念のため閉じる (導線は Home 側にあり通常は未表示).
+            if (_settingsPanel != null) _settingsPanel.SetActive(false);
             Debug.Log("[AppFlowController] mode -> Child: home panel hidden");
         }
         else // Adult
@@ -227,6 +231,37 @@ public class AppFlowController : MonoBehaviour
         Show(screen, null);
     }
 
+    // 設定画面 (M4 S0): Home ヘッダの「設定」から呼ばれる全画面オーバーレイの開閉.
+    // 大人モードかつ Home 表示中のみ開く (子供モードでは Home ごと隠れており導線も出ない).
+    public void OpenSettings()
+    {
+        var gs = GameStateService.Instance;
+        if (gs != null && gs.CurrentMode != GameStateService.GameMode.Adult)
+        {
+            Debug.Log("[AppFlowController] OpenSettings ignored (not Adult mode)");
+            return;
+        }
+        if (_currentScreen != AppScreen.Home)
+        {
+            Debug.Log($"[AppFlowController] OpenSettings ignored (current screen={_currentScreen})");
+            return;
+        }
+        if (_settingsPanel != null)
+        {
+            _settingsPanel.SetActive(true);
+            Debug.Log("[AppFlowController] settings opened");
+        }
+    }
+
+    public void CloseSettings()
+    {
+        if (_settingsPanel != null)
+        {
+            _settingsPanel.SetActive(false);
+            Debug.Log("[AppFlowController] settings closed");
+        }
+    }
+
     private void SetStatus(string s)
     {
         if (_statusText != null)
@@ -280,6 +315,13 @@ public class AppFlowController : MonoBehaviour
         _homePanel.SetActive(false);
 
         _statusText = CreateStatusText(canvasGO);
+
+        // Settings (M4 S0): Home から開く全画面オーバーレイ. 最後に生成して最前面に置き,
+        // 開いている間は StatusBar も覆う. 中身は後続 Step で SettingsPanel に追加する.
+        _settingsPanel = CreateBarePanel(canvasGO, "SettingsPanel", new Color(0.10f, 0.12f, 0.20f, 1f));
+        _settingsPanelComponent = _settingsPanel.AddComponent<SettingsPanel>();
+        _settingsPanelComponent.Initialize(this, _font);
+        _settingsPanel.SetActive(false);
     }
 
     // ラベルなしの全画面背景パネル (中身は LoginPanel / OnboardingPanel が後から生成する).

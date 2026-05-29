@@ -192,7 +192,7 @@ public class HomePanel : MonoBehaviour
         vlg.childControlHeight = false;
         vlg.childForceExpandHeight = false;
 
-        CreateHeader(root, "ホーム");
+        CreateHeaderRow(root);
 
         // メンバー切替タブ行
         _tabRow = new GameObject("TabRow");
@@ -449,6 +449,73 @@ public class HomePanel : MonoBehaviour
         t.color = Color.white;
         t.alignment = TextAnchor.MiddleCenter;
         return t;
+    }
+
+    // ヘッダ行: 左端の「設定」導線 + タイトル「ホーム」(M4 S0).
+    // 「設定」を左端に置くのは, 背後 M2 シーンの ToChildButton (子供モードに渡す) が
+    // 画面右上角に固定配置 (anchor 右上 / 480x160) のため. 右端だと前面の設定ボタンが
+    // ToChildButton を覆ってしまう → 左に寄せて重なりを回避する (ToChildButton 側は非編集).
+    // 設定は大人モード専用だが, Home パネル自体が子供モードで非表示
+    // (AppFlowController.OnGameModeChanged) のため, 子供モードではこの導線も出ない。
+    private void CreateHeaderRow(GameObject parent)
+    {
+        var row = new GameObject("HeaderRow");
+        row.transform.SetParent(parent.transform, false);
+        var le = row.AddComponent<LayoutElement>();
+        le.minHeight = 80;
+        var hlg = row.AddComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 8;
+        hlg.childControlWidth = true;
+        hlg.childForceExpandWidth = false;
+        hlg.childControlHeight = true;
+        hlg.childForceExpandHeight = true;
+        hlg.childAlignment = TextAnchor.MiddleCenter;
+
+        // 設定導線 (左端固定幅). アイコンではなくテキストにして legacy フォントでの欠字を避ける.
+        // 右上は背後 M2 の ToChildButton 専有のため左端に置く (上記コメント参照).
+        var btnGo = new GameObject("SettingsButton");
+        btnGo.transform.SetParent(row.transform, false);
+        var btnLe = btnGo.AddComponent<LayoutElement>();
+        btnLe.minWidth = 160;
+        btnLe.preferredWidth = 160;
+        var img = btnGo.AddComponent<Image>();
+        img.color = new Color(0.30f, 0.34f, 0.42f);
+        var btn = btnGo.AddComponent<Button>();
+        btn.targetGraphic = img;
+        btn.onClick.AddListener(OnSettingsClicked);
+
+        var labelGo = new GameObject("Text");
+        labelGo.transform.SetParent(btnGo.transform, false);
+        var lr = labelGo.AddComponent<RectTransform>();
+        lr.anchorMin = Vector2.zero; lr.anchorMax = Vector2.one;
+        lr.offsetMin = Vector2.zero; lr.offsetMax = Vector2.zero;
+        var lt = labelGo.AddComponent<Text>();
+        lt.text = "設定";
+        lt.font = _font;
+        lt.fontSize = 30;
+        lt.color = Color.white;
+        lt.alignment = TextAnchor.MiddleCenter;
+
+        // タイトル (残り幅を占有). 左寄せにして, 右上の ToChildButton 領域にグリフが
+        // かからないようにする (設定ボタンの右隣に「ホーム」が並ぶ).
+        var titleGo = new GameObject("Title");
+        titleGo.transform.SetParent(row.transform, false);
+        var titleLe = titleGo.AddComponent<LayoutElement>();
+        titleLe.flexibleWidth = 1f;
+        var title = titleGo.AddComponent<Text>();
+        title.text = "ホーム";
+        title.font = _font;
+        title.fontSize = 40;
+        title.color = Color.white;
+        title.alignment = TextAnchor.MiddleLeft;
+    }
+
+    private void OnSettingsClicked()
+    {
+        if (_appFlow != null)
+        {
+            _appFlow.OpenSettings();
+        }
     }
 
     private Button CreateButton(GameObject parent, string label, Color color,
