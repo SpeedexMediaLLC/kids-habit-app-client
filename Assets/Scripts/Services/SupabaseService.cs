@@ -27,7 +27,18 @@ public static class SupabaseService
     public static Supabase.Client Client { get; private set; }
     public static bool IsInitialized { get; private set; }
 
-    private static UniTask? _initTask;
+    // 初期化は AsyncLazy で表現する。AsyncLazy は内部に専用の UniTaskCompletionSource を 1 つ持ち、
+    // DoInitializeAsync の完了をそこへ中継するため、各呼び出し元が await するのは毎回その
+    // completionSource.Task (正規の TCS) になる。これにより「初期化を一度だけ実行」しつつ
+    // 「完了前・完了後を問わず複数経路から安全に await」できる。
+    //
+    // 旧 Unitask.Preserve() 方式では NG だった理由:
+    //   Preserve() の MemoizeSource は source 完了「後」の再 await は救うが、完了「前」に複数経路が
+    //   同時に await すると内側 source (async ステートマシンの UniTaskCompletionSourceCore) へ
+    //   continuation を二重登録し "Already continuation registered, can not await twice" を投げる。
+    //   起動時は BeforeSceneLoad (AutoInit) と AfterSceneLoad (AppFlowController) が両方とも
+    //   完了前に await するため必ず衝突していた。
+    private static readonly AsyncLazy _initLazy = new AsyncLazy(DoInitializeAsync);
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void AutoInitOnAppStart()
@@ -42,17 +53,10 @@ public static class SupabaseService
             Debug.Log("[SupabaseService] InitializeAsync called: already initialized (immediate return)");
             return UniTask.CompletedTask;
         }
-        if (_initTask.HasValue)
-        {
-            // 既に init が進行中 / もしくは faulted で固まっている場合、同じ UniTask を返す。
-            // 後段の "init complete" が出ない経路で同じ呼び出しが繰り返されるなら、
-            // init が完了せず張り付いているサインになる。
-            Debug.Log("[SupabaseService] InitializeAsync called: returning cached _initTask (await existing in-flight init; if 'init complete' never appears below, the cached task is stuck or faulted)");
-            return _initTask.Value;
-        }
-        Debug.Log("[SupabaseService] InitializeAsync called: starting new init task");
-        _initTask = DoInitializeAsync();
-        return _initTask.Value;
+        // AsyncLazy.Task は初回アクセスで factory を一度だけ起動し、以降は同じ
+        // completionSource を返す。複数経路からの同時 await も安全。
+        Debug.Log("[SupabaseService] InitializeAsync called: awaiting AsyncLazy init task");
+        return _initLazy.Task;
     }
 
     private static async UniTask DoInitializeAsync()
@@ -103,8 +107,12 @@ public static class SupabaseService
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError(
-                        $"[SupabaseService] saved session restore failed (cleared): {ex.ToString()}");
+                    // 捕捉済み・回復可能な想定内事象 (保存 refresh token が失効/使用済み 等) のため
+                    // Error ではなく Warning。クリアして以降は未ログイン扱い → 再ログインで解消する。
+                    // ここで例外を握りつぶすので初期化自体は継続し IsInitialized=true で完了する
+                    // (AppFlowController は CurrentSession=null を見て Login へクリーンに分岐)。
+                    Debug.LogWarning(
+                        $"[SupabaseService] saved session restore failed; cleared, re-login required: {ex.ToString()}");
                     SessionPersistence.Clear();
                 }
             }
