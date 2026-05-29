@@ -38,6 +38,8 @@ public class HomePanel : MonoBehaviour
     private MemberModel _selectedMember;
     private HabitModel _selectedHabit;
     private CreatureDisplay _creatureDisplay;
+    private Button _passButton;
+    private GameObject _confirmDialog;
 
     private bool _built;
     private bool _loading;
@@ -117,6 +119,7 @@ public class HomePanel : MonoBehaviour
         UpdateCreature();
         BuildHabitList();
         UpdateSummary();
+        UpdatePassButton();
     }
 
     private void UpdateTabHighlight()
@@ -228,6 +231,11 @@ public class HomePanel : MonoBehaviour
         var sumLe = _summaryText.gameObject.GetComponent<LayoutElement>();
         if (sumLe != null) sumLe.minHeight = 70;
 
+        // 「子供モードに渡す」(habit 選択時のみ有効, Step 6)
+        _passButton = CreateButton(root, "このやることを こどもにわたす",
+            new Color(0.85f, 0.45f, 0.20f), OnPassClicked);
+        _passButton.interactable = false;
+
         // ステータス
         _statusText = CreateLine(root, "", 24, new Color(1f, 0.9f, 0.6f));
     }
@@ -328,6 +336,102 @@ public class HomePanel : MonoBehaviour
             kv.Value.color = (kv.Key == habit.Id) ? RowOn : RowOff;
         }
         Debug.Log($"[HomePanel] habit selected: {habit.Title} ({habit.Id})");
+        UpdatePassButton();
+    }
+
+    // ---------- 子供モードに渡す (Step 6) ----------
+
+    private void UpdatePassButton()
+    {
+        if (_passButton != null)
+        {
+            // 子供にわたすのは child メンバーの habit のみ (要確認① 設定さん判断 2026-05-29).
+            // parent タブ選択時は無効. 併用条件: child タブ かつ habit 1 件選択中.
+            bool isChild = _selectedMember != null && _selectedMember.Role == "child";
+            _passButton.interactable = (isChild && _selectedHabit != null);
+        }
+    }
+
+    private void OnPassClicked()
+    {
+        if (_selectedMember == null || _selectedHabit == null)
+        {
+            return;
+        }
+        ShowConfirmDialog();
+    }
+
+    private void ShowConfirmDialog()
+    {
+        CloseDialog();
+
+        // 全画面オーバーレイ (HomePanel 直下 = 同 Canvas 内で最後の子 = 最前面).
+        var overlay = new GameObject("ConfirmDialog");
+        overlay.transform.SetParent(transform, false);
+        var orect = overlay.AddComponent<RectTransform>();
+        orect.anchorMin = Vector2.zero; orect.anchorMax = Vector2.one;
+        orect.offsetMin = Vector2.zero; orect.offsetMax = Vector2.zero;
+        var obg = overlay.AddComponent<Image>();
+        obg.color = new Color(0f, 0f, 0f, 0.75f);
+        _confirmDialog = overlay;
+
+        var box = new GameObject("Box");
+        box.transform.SetParent(overlay.transform, false);
+        var brect = box.AddComponent<RectTransform>();
+        brect.anchorMin = new Vector2(0.1f, 0.34f);
+        brect.anchorMax = new Vector2(0.9f, 0.66f);
+        brect.offsetMin = Vector2.zero; brect.offsetMax = Vector2.zero;
+        var bbg = box.AddComponent<Image>();
+        bbg.color = new Color(0.15f, 0.18f, 0.25f, 1f);
+        var vlg = box.AddComponent<VerticalLayoutGroup>();
+        vlg.spacing = 18;
+        vlg.padding = new RectOffset(30, 30, 30, 30);
+        vlg.childControlWidth = true; vlg.childForceExpandWidth = true;
+        vlg.childControlHeight = true; vlg.childForceExpandHeight = false;
+        vlg.childAlignment = TextAnchor.MiddleCenter;
+
+        var msg = CreateLine(box, $"「{_selectedHabit.Title}」を\nこどもにわたしますか?", 30, Color.white);
+        var msgLe = msg.gameObject.GetComponent<LayoutElement>();
+        if (msgLe != null) msgLe.minHeight = 150;
+
+        CreateButton(box, "わたす", new Color(0.20f, 0.55f, 0.35f), DoPass);
+        CreateButton(box, "やめる", new Color(0.45f, 0.45f, 0.50f), CloseDialog);
+    }
+
+    private void DoPass()
+    {
+        CloseDialog();
+        if (_selectedMember == null || _selectedHabit == null)
+        {
+            return;
+        }
+        // M2 の巨大ボタン (HabitButton) に選択 member/habit を注入 (Inspector 固定値を上書き).
+        var habitButton = FindFirstObjectByType<HabitButton>();
+        if (habitButton == null)
+        {
+            SetStatus("子供モードのボタンが見つかりません (HabitButton)");
+            return;
+        }
+        habitButton.SetTarget(_selectedMember.Id.ToString(), _selectedHabit.Id.ToString());
+
+        var gs = GameStateService.Instance;
+        if (gs == null)
+        {
+            SetStatus("GameStateService が見つかりません");
+            return;
+        }
+        // SwitchToChild → ModeChanged → AppFlowController が Home パネルを隠し M2 キャラ画面を表示.
+        gs.SwitchToChild();
+        Debug.Log($"[HomePanel] pass to child: member={_selectedMember.Id} habit={_selectedHabit.Id}");
+    }
+
+    private void CloseDialog()
+    {
+        if (_confirmDialog != null)
+        {
+            Destroy(_confirmDialog);
+            _confirmDialog = null;
+        }
     }
 
     // ---------- UI helpers ----------
@@ -345,6 +449,33 @@ public class HomePanel : MonoBehaviour
         t.color = Color.white;
         t.alignment = TextAnchor.MiddleCenter;
         return t;
+    }
+
+    private Button CreateButton(GameObject parent, string label, Color color,
+                                UnityEngine.Events.UnityAction onClick)
+    {
+        var go = new GameObject("Button_" + label);
+        go.transform.SetParent(parent.transform, false);
+        var le = go.AddComponent<LayoutElement>();
+        le.minHeight = 96;
+        var img = go.AddComponent<Image>();
+        img.color = color;
+        var btn = go.AddComponent<Button>();
+        btn.targetGraphic = img;
+        btn.onClick.AddListener(onClick);
+
+        var textGO = new GameObject("Text");
+        textGO.transform.SetParent(go.transform, false);
+        var tr = textGO.AddComponent<RectTransform>();
+        tr.anchorMin = Vector2.zero; tr.anchorMax = Vector2.one;
+        tr.offsetMin = Vector2.zero; tr.offsetMax = Vector2.zero;
+        var t = textGO.AddComponent<Text>();
+        t.text = label;
+        t.font = _font;
+        t.fontSize = 30;
+        t.color = Color.white;
+        t.alignment = TextAnchor.MiddleCenter;
+        return btn;
     }
 
     private Text CreateLine(GameObject parent, string text, int size, Color color)

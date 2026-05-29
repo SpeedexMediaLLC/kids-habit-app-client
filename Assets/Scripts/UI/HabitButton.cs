@@ -10,6 +10,15 @@ public class HabitButton : MonoBehaviour
     [SerializeField] private string targetMemberId;
     [SerializeField] private string habitId;
 
+    // M3 Step 6: ホームで選択した member/habit を子供モードに渡す前に注入する.
+    // これにより MainScene Inspector の固定値依存を除去 (実行時に上書き).
+    public void SetTarget(string newTargetMemberId, string newHabitId)
+    {
+        targetMemberId = newTargetMemberId;
+        habitId = newHabitId;
+        Debug.Log($"[HabitButton] SetTarget member={newTargetMemberId} habit={newHabitId}");
+    }
+
     public void OnClick()
     {
         Debug.Log("habit button pressed");

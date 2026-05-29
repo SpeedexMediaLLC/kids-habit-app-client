@@ -38,7 +38,10 @@ public class AppFlowController : MonoBehaviour
     private GameObject _onboardingPanel;
     private GameObject _homePanel;
     private HomePanel _homePanelComponent;
+    private GameObject _statusBar;
     private Text _statusText;
+    private AppScreen _currentScreen;
+    private GameStateService _subscribedGameState;
 
     // MainScene 起動後に自身を生成する. TestM1Scene / SampleScene 等では起動しない
     // (M1Tester と衝突させない).
@@ -74,13 +77,53 @@ public class AppFlowController : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (_subscribedGameState != null)
+        {
+            _subscribedGameState.ModeChanged -= OnGameModeChanged;
+            _subscribedGameState = null;
+        }
         // 次回 Play で再生成できるようにガードを解除.
         _bootstrapped = false;
     }
 
     private void Start()
     {
+        // 子供モード/大人モード切替に追従して Home パネルの表示を制御する (Step 6).
+        // GameStateService は MainScene 常駐. AfterSceneLoad 生成の本コンポーネントの Start 時点で
+        // GameState.Awake は完了済み = Instance は解決済み.
+        var gs = GameStateService.Instance;
+        if (gs != null)
+        {
+            _subscribedGameState = gs;
+            gs.ModeChanged += OnGameModeChanged;
+        }
+        else
+        {
+            Debug.LogWarning("[AppFlowController] GameStateService.Instance not found; child-mode hand-off disabled");
+        }
         RouteAsync().Forget();
+    }
+
+    // 子供モードでは M2 のキャラ画面 (巨大ボタン) を見せるため Home パネルと大人向け
+    // StatusBar を隠す. 大人モード復帰時、Home ルートにいたら Home を再表示して最新化する.
+    private void OnGameModeChanged(GameStateService.GameMode mode)
+    {
+        if (mode == GameStateService.GameMode.Child)
+        {
+            if (_homePanel != null) _homePanel.SetActive(false);
+            if (_statusBar != null) _statusBar.SetActive(false);
+            Debug.Log("[AppFlowController] mode -> Child: home panel hidden");
+        }
+        else // Adult
+        {
+            if (_currentScreen == AppScreen.Home)
+            {
+                if (_statusBar != null) _statusBar.SetActive(true);
+                if (_homePanel != null) _homePanel.SetActive(true);
+                if (_homePanelComponent != null) _homePanelComponent.Refresh();
+                Debug.Log("[AppFlowController] mode -> Adult: home panel restored + refresh");
+            }
+        }
     }
 
     // ---------- ルーティング ----------
@@ -140,6 +183,7 @@ public class AppFlowController : MonoBehaviour
 
     private void Show(AppScreen screen, string overrideMessage)
     {
+        _currentScreen = screen;
         if (_loginPanel != null) _loginPanel.SetActive(screen == AppScreen.Login);
         if (_onboardingPanel != null) _onboardingPanel.SetActive(screen == AppScreen.Onboarding);
         if (_homePanel != null) _homePanel.SetActive(screen == AppScreen.Home);
@@ -256,6 +300,7 @@ public class AppFlowController : MonoBehaviour
     private Text CreateStatusText(GameObject parent)
     {
         var go = new GameObject("StatusBar");
+        _statusBar = go;
         go.transform.SetParent(parent.transform, false);
         var rect = go.AddComponent<RectTransform>();
         rect.anchorMin = new Vector2(0f, 0.92f);
