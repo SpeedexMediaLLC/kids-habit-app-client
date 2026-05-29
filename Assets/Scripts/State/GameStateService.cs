@@ -79,9 +79,21 @@ public class GameStateService : MonoBehaviour
         {
             return;
         }
-        if (keyboard.escapeKey.wasPressedThisFrame && CurrentMode == GameMode.Child)
+        if (keyboard.escapeKey.wasPressedThisFrame)
         {
-            Debug.Log("[GameStateService] Esc/back pressed in Child mode - ignored");
+            if (CurrentMode == GameMode.Child)
+            {
+                Debug.Log("[GameStateService] Esc/back pressed in Child mode - ignored");
+            }
+            else
+            {
+                // Android Player では back button が Application.wantsToQuit を経由しない
+                // ケースがあるため、Adult モード時は明示的に Application.Quit() を呼ぶ。
+                // 方式 C (OnApplicationWantsToQuit) は Adult モード時に true 返却なので
+                // ここで Quit を呼んでも整合する。
+                Debug.Log("[GameStateService] Esc/back pressed in Adult mode - quitting");
+                Application.Quit();
+            }
         }
     }
 
