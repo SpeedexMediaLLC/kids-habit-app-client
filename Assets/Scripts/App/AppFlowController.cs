@@ -16,22 +16,13 @@
 
 using System;
 using Cysharp.Threading.Tasks;
-using Supabase.Postgrest.Attributes;
-using Supabase.Postgrest.Models;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-// members 件数判定用の最小 POCO (Step 1 専用, id のみ).
-// Step 4 で Scripts/Models/ に正式な MemberModel を作る際に置き換える想定.
-[Table("members")]
-public class AppFlowMemberRow : BaseModel
-{
-    [PrimaryKey("id", false)]
-    public Guid Id { get; set; }
-}
+// members 件数判定は Assets/Scripts/Models/MemberModel.cs を使用 (Step 4 で旧 Step1 専用 POCO を統合).
 
 public class AppFlowController : MonoBehaviour
 {
@@ -46,6 +37,7 @@ public class AppFlowController : MonoBehaviour
     private GameObject _loginPanel;
     private GameObject _onboardingPanel;
     private GameObject _homePanel;
+    private HomePanel _homePanelComponent;
     private Text _statusText;
 
     // MainScene 起動後に自身を生成する. TestM1Scene / SampleScene 等では起動しない
@@ -129,7 +121,7 @@ public class AppFlowController : MonoBehaviour
         //    1 件以上 = 家族あり → Home / 0 件 = 家族なし → Onboarding
         try
         {
-            var resp = await SupabaseService.Client.From<AppFlowMemberRow>().Get();
+            var resp = await SupabaseService.Client.From<MemberModel>().Get();
             int count = resp?.Models?.Count ?? 0;
             var dst = count > 0 ? AppScreen.Home : AppScreen.Onboarding;
             Debug.Log($"[AppFlowController] route: session ok, members count={count} -> {dst}");
@@ -151,6 +143,12 @@ public class AppFlowController : MonoBehaviour
         if (_loginPanel != null) _loginPanel.SetActive(screen == AppScreen.Login);
         if (_onboardingPanel != null) _onboardingPanel.SetActive(screen == AppScreen.Onboarding);
         if (_homePanel != null) _homePanel.SetActive(screen == AppScreen.Home);
+
+        // Home 表示時にデータ再取得 (メンバー/creature/habit/サマリー).
+        if (screen == AppScreen.Home && _homePanelComponent != null)
+        {
+            _homePanelComponent.Refresh();
+        }
 
         string msg = overrideMessage ?? $"分岐結果: {screen}";
         SetStatus(msg);
@@ -227,10 +225,11 @@ public class AppFlowController : MonoBehaviour
         _onboardingPanel = CreateBarePanel(canvasGO, "OnboardingPanel", new Color(0.10f, 0.20f, 0.15f, 1f));
         _onboardingPanel.AddComponent<OnboardingPanel>().Initialize(this, _font);
 
-        // Home (Step 4 で実装): 半透明で背後の M2 キャラ画面が残ることを可視化.
-        _homePanel = CreatePanel(canvasGO, "HomePanel",
-            new Color(0.0f, 0.0f, 0.0f, 0.25f),
-            "ホーム画面 (Step 4 で実装)\nセッション有・家族あり → ここに分岐\n(背後に M2 キャラ画面が残る)");
+        // Home (Step 4-5): 半透明背景 + HomePanel コンポーネントが UI を手続き生成.
+        // 半透明にして背後の M2 キャラ画面 (CreatureDisplay) が見えるようにする.
+        _homePanel = CreateBarePanel(canvasGO, "HomePanel", new Color(0.05f, 0.07f, 0.12f, 0.78f));
+        _homePanelComponent = _homePanel.AddComponent<HomePanel>();
+        _homePanelComponent.Initialize(this, _font);
 
         _loginPanel.SetActive(false);
         _onboardingPanel.SetActive(false);
@@ -251,37 +250,6 @@ public class AppFlowController : MonoBehaviour
         rect.offsetMax = Vector2.zero;
         var img = panel.AddComponent<Image>();
         img.color = bg;
-        return panel;
-    }
-
-    private GameObject CreatePanel(GameObject parent, string name, Color bg, string label)
-    {
-        var panel = new GameObject(name);
-        panel.transform.SetParent(parent.transform, false);
-        var rect = panel.AddComponent<RectTransform>();
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.offsetMin = Vector2.zero;
-        rect.offsetMax = Vector2.zero;
-        var img = panel.AddComponent<Image>();
-        img.color = bg;
-
-        var textGO = new GameObject("Label");
-        textGO.transform.SetParent(panel.transform, false);
-        var textRect = textGO.AddComponent<RectTransform>();
-        textRect.anchorMin = new Vector2(0.1f, 0.3f);
-        textRect.anchorMax = new Vector2(0.9f, 0.7f);
-        textRect.offsetMin = Vector2.zero;
-        textRect.offsetMax = Vector2.zero;
-        var text = textGO.AddComponent<Text>();
-        text.text = label;
-        text.font = _font;
-        text.fontSize = 44;
-        text.color = Color.white;
-        text.alignment = TextAnchor.MiddleCenter;
-        text.horizontalOverflow = HorizontalWrapMode.Wrap;
-        text.verticalOverflow = VerticalWrapMode.Overflow;
-
         return panel;
     }
 

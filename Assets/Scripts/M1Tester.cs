@@ -12,33 +12,8 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
 
-// --- Postgrest POCO (M1 検証用最小定義. ここ以外で再利用しない) ---
-
-[Table("habits")]
-public class HabitModel : BaseModel
-{
-    [PrimaryKey("id", false)]
-    public Guid Id { get; set; }
-
-    [Column("family_id")] public Guid FamilyId { get; set; }
-    [Column("member_id")] public Guid MemberId { get; set; }
-    [Column("title")]     public string Title { get; set; }
-    [Column("intensity")] public string Intensity { get; set; }
-    [Column("is_active")] public bool IsActive { get; set; }
-}
-
-[Table("creatures")]
-public class CreatureModel : BaseModel
-{
-    [PrimaryKey("id", false)]
-    public Guid Id { get; set; }
-
-    [Column("family_id")] public Guid FamilyId { get; set; }
-    [Column("member_id")] public Guid MemberId { get; set; }
-    [Column("name")]      public string Name { get; set; }
-    [Column("stage")]     public string Stage { get; set; }
-    [Column("total_growth_points")] public int TotalGrowthPoints { get; set; }
-}
+// Postgrest POCO (HabitModel / CreatureModel) は M3 で Assets/Scripts/Models/ に共通化移設.
+// MemberModel / HabitLogModel も同ディレクトリ. M1Tester はそれらを参照する.
 
 public class M1Tester : MonoBehaviour
 {
