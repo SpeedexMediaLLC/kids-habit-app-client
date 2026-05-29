@@ -280,6 +280,33 @@ public class AppFlowController : MonoBehaviour
         }
     }
 
+    // パスコード再設定導線 (M4 S3, 判断①): 設定の「パスコードを忘れた場合」から呼ばれる.
+    // 新パスコードのリセット書込みは行わない (server に旧不要の reset RPC が無い = M4 残ゲート).
+    // ログアウトしてログイン画面へ誘導するのみ. 再ログイン成功時は LoginPanel が Reroute() を
+    // 呼び家族有なら Home に戻る (= 大人モードに復帰. パスコード値は変わらない).
+    public void LogoutToLogin()
+    {
+        LogoutToLoginAsync().Forget();
+    }
+
+    private async UniTask LogoutToLoginAsync()
+    {
+        // 設定・ゲートのオーバーレイを閉じてから session を破棄する.
+        if (_settingsPanel != null) _settingsPanel.SetActive(false);
+        if (_passcodeGatePanel != null) _passcodeGatePanel.SetActive(false);
+        SetStatus("ログアウト中...");
+        try
+        {
+            await AuthService.SignOutAsync();
+        }
+        catch (Exception ex)
+        {
+            // SignOut 失敗 (通信不調等) でも安全側として Login を表示する.
+            Debug.LogWarning($"[AppFlowController] SignOut failed: {ex.Message}");
+        }
+        Show(AppScreen.Login, "ログイン");
+    }
+
     // パスコード照合ゲート (M4 S2): 子供モードの「おとなにもどる」から ModeSwitcher 経由で呼ばれる.
     // ゲートを前面表示し, 照合成功時のみ PasscodeGatePanel が SwitchToAdult を実行する.
     public void RequestAdultUnlock()

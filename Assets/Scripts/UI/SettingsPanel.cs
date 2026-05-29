@@ -57,6 +57,9 @@ public class SettingsPanel : MonoBehaviour
     private CanvasGroup _dialogGroup;
     private Text _dialogMessage;
 
+    // ---- パスコード変更オーバーレイ (M4 S3, 開いている間だけ存在) ----
+    private GameObject _passcodeChangeOverlay;
+
     // ---- 習慣フォーム (自由入力の追加 / 編集で共用) の状態 ----
     private HabitModel _formEditTarget;   // null = 自由入力の追加, 非 null = 編集
     private InputField _formTitleInput;
@@ -84,7 +87,8 @@ public class SettingsPanel : MonoBehaviour
     {
         if (_built)
         {
-            CloseDialog();   // 前回開いていたダイアログが残らないよう, 開くたびに初期化する.
+            CloseDialog();              // 前回のダイアログが残らないよう, 開くたびに初期化する.
+            ClosePasscodeChangePanel(); // パスコード変更オーバーレイの残留も掃除する.
             Refresh();
         }
     }
@@ -445,6 +449,68 @@ public class SettingsPanel : MonoBehaviour
         CreateButton(box, "やめる", new Color(0.45f, 0.45f, 0.50f), CloseDialog);
     }
 
+    // ---------- パスコード (M4 S3) ----------
+
+    // パスコード変更: 専用オーバーレイ (PasscodeChangePanel) を生成する. 変更ロジック・結果分岐は
+    // そのパネルが持つ (PasscodeEntry を 2 ステップで再利用). 閉じる時は OnPasscodeChangeClosed.
+    private void OnChangePasscodeClicked()
+    {
+        CloseDialog();                       // S1 系ダイアログが開いていれば閉じる
+        if (_passcodeChangeOverlay != null) return;   // 二重生成防止
+
+        var overlay = new GameObject("PasscodeChangeOverlay");
+        overlay.transform.SetParent(transform, false); // SettingsPanel 直下 = 最後の子 = 最前面
+        var rect = overlay.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero; rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero; rect.offsetMax = Vector2.zero;
+        var bg = overlay.AddComponent<Image>();
+        bg.color = new Color(0.10f, 0.12f, 0.20f, 1f);  // 設定画面と同系の不透明背景で下を覆う
+        _passcodeChangeOverlay = overlay;
+
+        var panel = overlay.AddComponent<PasscodeChangePanel>();
+        panel.Initialize(_font, OnPasscodeChangeClosed);
+    }
+
+    // changed=true のときだけ完了メッセージを設定ステータスに出す.
+    private void OnPasscodeChangeClosed(bool changed)
+    {
+        ClosePasscodeChangePanel();
+        if (changed)
+        {
+            SetStatus("パスコードを変更しました");
+        }
+    }
+
+    private void ClosePasscodeChangePanel()
+    {
+        if (_passcodeChangeOverlay != null)
+        {
+            Destroy(_passcodeChangeOverlay);
+            _passcodeChangeOverlay = null;
+        }
+    }
+
+    // パスコードを忘れた場合 (再ログイン導線・ナビのみ = 判断①). 確認後にログアウトしてログイン画面へ.
+    // 新パスコードのリセット書込みは作らない (server に reset RPC 不在 = M4 残ゲート).
+    private void OnForgotPasscodeClicked()
+    {
+        var box = BeginDialog("パスコードを忘れた場合");
+        CreateLine(box, "一度ログアウトして、メールとパスワードで\n再ログインします。よろしいですか?",
+            26, Color.white);
+        _dialogMessage = CreateLine(box, "", 24, new Color(1f, 0.9f, 0.6f));
+        CreateButton(box, "ログアウトする", new Color(0.60f, 0.25f, 0.25f), OnConfirmLogout);
+        CreateButton(box, "やめる", new Color(0.45f, 0.45f, 0.50f), CloseDialog);
+    }
+
+    private void OnConfirmLogout()
+    {
+        CloseDialog();
+        if (_appFlow != null)
+        {
+            _appFlow.LogoutToLogin();
+        }
+    }
+
     // ---------- RPC 実行 + 結果コード分岐 (3 RPC 共通) ----------
 
     private async UniTask RunMutationAsync(UniTask<ApiService.RpcResult> call,
@@ -640,6 +706,12 @@ public class SettingsPanel : MonoBehaviour
 
         // 追加導線
         CreateButton(column, "習慣を追加", new Color(0.20f, 0.55f, 0.35f), OnAddClicked);
+
+        // パスコード (M4 S3): 変更 (現+新) と, 忘れた場合の再ログイン導線 (ナビのみ).
+        CreateSubheader(column, "パスコード");
+        CreateButton(column, "パスコードを変更", new Color(0.20f, 0.45f, 0.70f), OnChangePasscodeClicked);
+        CreateButton(column, "パスコードを忘れた場合（再ログイン）",
+            new Color(0.45f, 0.45f, 0.50f), OnForgotPasscodeClicked);
 
         // ステータス
         _statusText = CreateLine(column, "", 24, new Color(1f, 0.9f, 0.6f));
