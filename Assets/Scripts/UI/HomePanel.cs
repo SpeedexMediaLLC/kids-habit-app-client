@@ -189,7 +189,11 @@ public class HomePanel : MonoBehaviour
         vlg.spacing = 14;
         vlg.childControlWidth = true;
         vlg.childForceExpandWidth = true;
-        vlg.childControlHeight = false;
+        // S1 修正: 高さを各要素の LayoutElement に委ねる (childControlHeight=true). 旧 false では
+        // minHeight (一覧 520 / ボタン 96 など) が無視され領域が潰れ, 一覧が creature・サマリー・
+        // 「こどもにわたす」ボタンと重なっていた. 一覧 (flexibleHeight=1) が余白を占有し他要素は
+        // それぞれの高さで縦に積まれる → 重なり解消 (完了条件 :687).
+        vlg.childControlHeight = true;
         vlg.childForceExpandHeight = false;
 
         CreateHeaderRow(root);
@@ -222,7 +226,8 @@ public class HomePanel : MonoBehaviour
         listVlg.padding = new RectOffset(12, 12, 12, 12);
         listVlg.childControlWidth = true;
         listVlg.childForceExpandWidth = true;
-        listVlg.childControlHeight = false;
+        // S1 修正: 各 habit 行に LayoutElement の高さ (84) を効かせ, 行同士が重ならないようにする.
+        listVlg.childControlHeight = true;
         listVlg.childForceExpandHeight = false;
         _habitListContent = listContainer;
 

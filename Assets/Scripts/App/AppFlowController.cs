@@ -272,6 +272,12 @@ public class AppFlowController : MonoBehaviour
             _settingsPanel.SetActive(false);
             Debug.Log("[AppFlowController] settings closed");
         }
+        // S1: 設定画面で行った習慣の追加/編集/削除をホームに反映する (完了条件 :687).
+        // 変更の有無に関わらず 1 回だけ再取得する (無害な再フェッチ. Phase 1 は小規模).
+        if (_homePanelComponent != null)
+        {
+            _homePanelComponent.Refresh();
+        }
     }
 
     // パスコード照合ゲート (M4 S2): 子供モードの「おとなにもどる」から ModeSwitcher 経由で呼ばれる.
