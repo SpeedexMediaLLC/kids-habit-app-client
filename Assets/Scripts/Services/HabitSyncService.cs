@@ -115,7 +115,7 @@ public class HabitSyncService : MonoBehaviour
             SqliteService.EnsureInitialized();
             if (!SqliteService.Available)
             {
-                Debug.LogWarning("[HabitSync] sqlite unavailable; direct send fallback");
+                Debug.LogWarning($"[HabitSync] sqlite unavailable ({SqliteService.InitError}); direct send fallback");
                 SendDirectFallbackAsync(member, habit).Forget();
                 return;
             }

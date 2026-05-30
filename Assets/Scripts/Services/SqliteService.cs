@@ -34,12 +34,19 @@ public static class SqliteService
 
     public static bool Available { get; private set; }
 
+    // 初期化失敗時の原因 (型 + メッセージ)。fallback ログ等の診断用。成功時は null。
+    public static string InitError { get; private set; }
+
     public static void EnsureInitialized()
     {
         if (_initTried) return;
         _initTried = true;
+        // 必ず「開始」を出す = EnsureInitialized が走ったことの確証 (握りつぶし誤認の防止)。
+        Debug.Log($"[SqliteService] init begin platform={Application.platform}");
         try
         {
+            // e_sqlite3 プロバイダ登録 (bundle_green)。ここで対象 ABI のネイティブ
+            // libe_sqlite3.so を P/Invoke するため、未同梱だと以降で DllNotFoundException 等になる。
             SQLitePCL.Batteries_V2.Init();
             var path = Path.Combine(Application.persistentDataPath, DbFileName);
             _db = new SQLiteConnection(path);
@@ -49,13 +56,20 @@ public static class SqliteService
                 "CREATE UNIQUE INDEX IF NOT EXISTS ux_pendinglog_habit_pending " +
                 "ON PendingLog (HabitId) WHERE Status = 'pending';");
             Available = true;
-            Debug.Log($"[SqliteService] initialized at {path}");
+            InitError = null;
+            Debug.Log($"[SqliteService] init OK (offline queue enabled) at {path}");
         }
         catch (Exception ex)
         {
             Available = false;
+            InitError = ex.GetType().Name + ": " + ex.Message;
+            // 例外の型・メッセージ・スタックを必ず残す。原因の多くは Android のネイティブ
+            // libe_sqlite3.so が対象 ABI で APK に同梱されていない (DllNotFoundException 等)。
+            // 同梱先: Assets/Plugins/Android/libs/<abi>/libe_sqlite3.so (arm64-v8a 必須)。
             Debug.LogError(
-                $"[SqliteService] init failed; offline queue disabled (direct send fallback): {ex}");
+                "[SqliteService] init FAILED — offline queue disabled (direct send fallback). " +
+                "原因の多くは Android ネイティブ libe_sqlite3.so の未同梱/ABI 不一致。 " +
+                $"InitError={InitError}\n{ex}");
         }
     }
 
