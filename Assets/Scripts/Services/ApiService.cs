@@ -134,6 +134,9 @@ public static class ApiService
 
         UnityEngine.Debug.Log($"[ApiService] Client.Rpc begin function={procedureName}");
         var response = await SupabaseService.Client.Rpc(procedureName, parameters);
+        // M5: サーバー時刻 anchor をレスポンスの Date ヘッダから供給する (ServerClock §5.4.1)。
+        // 専用 RPC を足さず既存応答を使う = server 無改修。
+        ServerClock.FeedFromHttp(response?.ResponseMessage);
         // BaseResponse には StatusCode プロパティが直接無いため ResponseMessage 経由で取得。
         // HttpResponseMessage が null の場合 (応答自体無し) も視覚化できるよう "null" 表示にする。
         UnityEngine.Debug.Log(

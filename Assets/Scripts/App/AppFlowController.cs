@@ -51,6 +51,9 @@ public class AppFlowController : MonoBehaviour
     private PasscodeGatePanel _passcodeGatePanelComponent;
     private GameObject _statusBar;
     private Text _statusText;
+    private GameObject _toast;        // M5: 同期系の控えめトースト (大人モードのみ表示)
+    private Text _toastText;
+    private int _toastSeq;
     private AppScreen _currentScreen;
     private GameStateService _subscribedGameState;
 
@@ -130,6 +133,8 @@ public class AppFlowController : MonoBehaviour
             if (_statusBar != null) _statusBar.SetActive(false);
             // 設定は大人モード専用. 子供モードに渡る際は念のため閉じる (導線は Home 側にあり通常は未表示).
             if (_settingsPanel != null) _settingsPanel.SetActive(false);
+            // M5: 同期トーストは子供画面では出さない (:695). 表示中なら隠す.
+            if (_toast != null) _toast.SetActive(false);
             Debug.Log("[AppFlowController] mode -> Child: home panel hidden");
         }
         else // Adult
@@ -197,6 +202,7 @@ public class AppFlowController : MonoBehaviour
         try
         {
             var resp = await SupabaseService.Client.From<MemberModel>().Get();
+            ServerClock.FeedFromHttp(resp?.ResponseMessage); // M5: 起動時にサーバー時刻 anchor を供給
             int count = resp?.Models?.Count ?? 0;
             var dst = count > 0 ? AppScreen.Home : AppScreen.Onboarding;
             Debug.Log($"[AppFlowController] route: session ok, no pending, members count={count} -> {dst}");
@@ -219,6 +225,7 @@ public class AppFlowController : MonoBehaviour
         try
         {
             var resp = await SupabaseService.Client.From<DeletionRequestModel>().Get();
+            ServerClock.FeedFromHttp(resp?.ResponseMessage); // M5: 起動時にサーバー時刻 anchor を供給
             var models = resp?.Models;
             if (models == null) return false;
             foreach (var r in models)
@@ -453,6 +460,9 @@ public class AppFlowController : MonoBehaviour
         _passcodeGatePanelComponent = _passcodeGatePanel.AddComponent<PasscodeGatePanel>();
         _passcodeGatePanelComponent.Initialize(this, _font);
         _passcodeGatePanel.SetActive(false);
+
+        // Sync toast (M5): 同期系の控えめな通知。最前面 (gate より後) に置き, 大人モードのみ表示する.
+        CreateToast(canvasGO);
     }
 
     // ラベルなしの全画面背景パネル (中身は LoginPanel / OnboardingPanel が後から生成する).
@@ -498,5 +508,69 @@ public class AppFlowController : MonoBehaviour
         text.horizontalOverflow = HorizontalWrapMode.Wrap;
         text.verticalOverflow = VerticalWrapMode.Truncate;
         return text;
+    }
+
+    // ---------- 同期トースト (M5) ----------
+
+    // HabitSyncService から呼ばれる控えめな通知. 子供画面では出さない (:695) =
+    // 大人モード時のみ表示し, 一定時間で自動的に消える.
+    public void ShowSyncToast(string msg)
+    {
+        var gs = GameStateService.Instance;
+        if (gs != null && gs.CurrentMode != GameStateService.GameMode.Adult)
+        {
+            return; // 子供画面では出さない
+        }
+        if (_toast == null || _toastText == null)
+        {
+            return;
+        }
+        _toastText.text = msg;
+        _toast.SetActive(true);
+        _toastSeq++;
+        HideToastAfterDelay(_toastSeq).Forget();
+        Debug.Log($"[AppFlowController] toast: {msg}");
+    }
+
+    private async UniTask HideToastAfterDelay(int seq)
+    {
+        await UniTask.Delay(TimeSpan.FromSeconds(2.5));
+        // 後続トーストが出ていなければ消す (連続表示時は最新の seq だけが消す).
+        if (seq == _toastSeq && _toast != null)
+        {
+            _toast.SetActive(false);
+        }
+    }
+
+    private void CreateToast(GameObject parent)
+    {
+        var go = new GameObject("SyncToast");
+        _toast = go;
+        go.transform.SetParent(parent.transform, false);
+        var rect = go.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.08f, 0.10f);
+        rect.anchorMax = new Vector2(0.92f, 0.16f);
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        var img = go.AddComponent<Image>();
+        img.color = new Color(0f, 0f, 0f, 0.72f);
+
+        var textGO = new GameObject("Text");
+        textGO.transform.SetParent(go.transform, false);
+        var tr = textGO.AddComponent<RectTransform>();
+        tr.anchorMin = Vector2.zero;
+        tr.anchorMax = Vector2.one;
+        tr.offsetMin = new Vector2(20, 0);
+        tr.offsetMax = new Vector2(-20, 0);
+        var t = textGO.AddComponent<Text>();
+        t.font = _font;
+        t.fontSize = 26;
+        t.color = new Color(1f, 1f, 1f, 0.92f);
+        t.alignment = TextAnchor.MiddleCenter;
+        t.horizontalOverflow = HorizontalWrapMode.Wrap;
+        t.verticalOverflow = VerticalWrapMode.Truncate;
+        _toastText = t;
+
+        go.SetActive(false);
     }
 }
