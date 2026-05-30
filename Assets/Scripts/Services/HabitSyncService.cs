@@ -28,6 +28,10 @@ public class HabitSyncService : MonoBehaviour
     // 影響しない (既定 false)。設定さんが Editor でオフライン→同期を確認する際に外部から立てる用途。
     public static bool DebugForceOffline = false;
 
+    // 検証用 (finding 2): true の間、送信を擬似的に失敗させる (オンラインのままサーバ一時障害を模擬)。
+    // オンライン継続中のバックオフ再送が効くかを Editor で確認する用途。既定 false・UI 無し。
+    public static bool DebugForceSendFailure = false;
+
     private const string MainSceneName = "MainScene";
     private static bool _bootstrapped;
 
@@ -35,6 +39,13 @@ public class HabitSyncService : MonoBehaviour
     private float _pollTimer;
     private bool _lastOnline;
     private bool _flushing;
+
+    // finding 2 (medium): オンライン継続中でもサーバ一時障害で pending が滞留しないよう、
+    // バックオフ付きで定期再送する。最短 5s → 失敗ごとに倍化 → 最長 120s でクランプ、捌け切れば最短に戻す。
+    private const float RetryMinSec = 5f;
+    private const float RetryMaxSec = 120f;
+    private float _retryAccum;
+    private float _retryIntervalSec = RetryMinSec;
 
     private enum FlushStep { Continue, StopRetry, StopTerminal }
 
@@ -86,7 +97,31 @@ public class HabitSyncService : MonoBehaviour
         {
             Debug.Log($"[HabitSync] online {_lastOnline} -> {online}");
             _lastOnline = online;
-            if (online) TryFlush("online-recovered");
+            if (online)
+            {
+                _retryIntervalSec = RetryMinSec; // 復活直後は最短間隔から
+                _retryAccum = 0f;
+                TryFlush("online-recovered");
+            }
+            return; // 遷移したフレームは上の TryFlush に任せる
+        }
+
+        // finding 2: オンライン継続中でも pending が残っていれば、バックオフ付きで定期再送する。
+        // internetReachability は online のまま Supabase/DNS/TLS が一時失敗するケースを救う
+        // (遷移・focus・押下トリガだけに依存しない)。最短 5s 間隔なので busy-loop にはならない。
+        if (online && !_flushing)
+        {
+            _retryAccum += PollInterval;
+            if (_retryAccum >= _retryIntervalSec)
+            {
+                _retryAccum = 0f;
+                if (SqliteService.HasPending())
+                {
+                    Debug.Log($"[HabitSync] online retry (interval={_retryIntervalSec:0}s)");
+                    TryFlush("online-retry-backoff");
+                    // バックオフは FlushAsync 完了時に結果で調整する (成功→最短 / 失敗→倍化)。
+                }
+            }
         }
     }
 
@@ -101,52 +136,68 @@ public class HabitSyncService : MonoBehaviour
 
     // ---------- 押下入口 (HabitButton から) ----------
 
-    // 演出 (光る/サイズアップ/音) は押下側 (HabitButton) が即時に再生済 (§5.1-5)。
-    // ここではローカル窓チェック → pending 投入 → 送信/キューだけを担う。
-    public void RequestRecord(Guid memberId, Guid habitId)
+    // 押下入口。ローカル窓チェック → pending 投入 → 送信/キューを同期的に判断し、
+    // 「成功演出を出してよいか」を返す (true=出す / false=保存できなかったので出さない)。
+    // 演出 (光る/サイズアップ/音) を実際に再生するのは押下側 (HabitButton)。通信は待たない (§5.1-5)。
+    // finding 1: 上限到達など「保存できない」ときは成功を偽らない (演出も「あとで送る」も出さず正直に弾く)。
+    public bool RequestRecord(Guid memberId, Guid habitId)
     {
         string habit = habitId.ToString();
         string member = memberId.ToString();
         bool haveTime = ServerClock.TryNowUtc(out var nowUtc);
 
-        // SQLite が使えない稀な環境はキュー無しの直接送信にフォールバック。
+        // SQLite が使えない稀な環境 (ネイティブ未配置等)。
         if (!SqliteService.Available)
         {
             SqliteService.EnsureInitialized();
             if (!SqliteService.Available)
             {
-                Debug.LogWarning($"[HabitSync] sqlite unavailable ({SqliteService.InitError}); direct send fallback");
-                SendDirectFallbackAsync(member, habit).Forget();
-                return;
+                if (IsOnline)
+                {
+                    // オンラインならキュー無しで直接送信 (送信見込みあり → 演出 OK)。
+                    Debug.LogWarning($"[HabitSync] sqlite unavailable ({SqliteService.InitError}); direct online send");
+                    SendDirectFallbackAsync(member, habit).Forget();
+                    return true;
+                }
+                // オフライン + キュー不可 = 保存できない → 正直に弾く (演出を出さない)。
+                Debug.LogWarning($"[HabitSync] sqlite unavailable ({SqliteService.InitError}) + offline; reject press");
+                ShowCannotSaveMessage();
+                return false;
             }
         }
 
         // 連打/重複防止 (§5.4.2/§5.4.3): 未送信 pending or 10 分窓内の成功/却下があれば新規を作らない。
-        // 子供画面では演出だけ流す (再生済) = 体験を壊さない。大人モードなら控えめにクールダウン表示。
+        // 子供画面では演出だけ流す (= 体験を壊さない・データ損失なし)。大人モードは控えめにクールダウン表示。
         if (haveTime && SqliteService.HasBlockingEntry(habit, nowUtc, out var cooldownUntil))
         {
-            Debug.Log($"[HabitSync] press ignored (cooldown/pending) habit={habit}");
+            Debug.Log($"[HabitSync] press within cooldown/pending habit={habit}; effect only");
             ShowCooldownToastIfAdult(cooldownUntil, nowUtc);
-            return;
+            return true;
         }
 
         string clientEventId = Guid.NewGuid().ToString();
         DateTimeOffset? created = haveTime ? nowUtc : (DateTimeOffset?)null;
-        if (!SqliteService.TryEnqueue(habit, member, clientEventId, created))
+        var enq = SqliteService.TryEnqueue(habit, member, clientEventId, created);
+        switch (enq)
         {
-            // 50 件上限 or 既に pending → 送信待ちが詰まっている (子供には出さない)。
-            ShowToastIfAdult("送信待ちが多いため、あとで自動で送ります");
-            return;
-        }
-        Debug.Log($"[HabitSync] enqueued habit={habit} event={clientEventId} online={IsOnline}");
+            case SqliteService.EnqueueResult.Enqueued:
+                Debug.Log($"[HabitSync] enqueued habit={habit} event={clientEventId} online={IsOnline}");
+                if (IsOnline) TryFlush("press");
+                else ShowToastIfAdult("オフラインのため、あとで自動で送信します");
+                return true;
 
-        if (IsOnline)
-        {
-            TryFlush("press");
-        }
-        else
-        {
-            ShowToastIfAdult("オフラインのため、あとで自動で送信します");
+            case SqliteService.EnqueueResult.AlreadyPending:
+                // 既に未送信 pending がある (時刻基準が無く窓判定を通過したケース)。データ損失ではない。
+                Debug.Log($"[HabitSync] already pending habit={habit}; effect only");
+                if (IsOnline) TryFlush("press-existing");
+                return true;
+
+            case SqliteService.EnqueueResult.CapReached:
+            default:
+                // 上限到達 (or 不可) で保存できない = 進捗が失われる → 成功を偽らず正直に弾く (演出を出さない)。
+                Debug.LogWarning($"[HabitSync] cannot save press (result={enq}); reject without success effect");
+                ShowCannotSaveMessage();
+                return false;
         }
     }
 
@@ -182,6 +233,12 @@ public class HabitSyncService : MonoBehaviour
         finally
         {
             _flushing = false;
+            // finding 2: 次回バックオフ間隔を結果で調整する。pending が残れば倍化 (サーバを叩き過ぎない)、
+            // 捌け切れば最短にリセット。retry の計時もリセットし次回まで間隔を空ける。
+            _retryAccum = 0f;
+            _retryIntervalSec = SqliteService.PendingCount() > 0
+                ? Mathf.Min(_retryIntervalSec * 2f, RetryMaxSec)
+                : RetryMinSec;
         }
     }
 
@@ -198,6 +255,11 @@ public class HabitSyncService : MonoBehaviour
 
         try
         {
+            if (DebugForceSendFailure)
+            {
+                // 検証用: オンラインのままサーバ到達だけ失敗するケースを模擬 (finding 2 のバックオフ確認)。
+                throw new Exception("DebugForceSendFailure (test): simulated transient server failure");
+            }
             var result = await ApiService.RecordHabitAsync(member, habit, clientEventId);
             return ApplyResult(row, result);
         }
@@ -321,6 +383,19 @@ public class HabitSyncService : MonoBehaviour
     {
         // ShowSyncToast 側で子供モードは抑止する (二重ガード)。
         AppFlowController.Instance?.ShowSyncToast(msg);
+    }
+
+    // finding 1: 保存できなかった (上限到達 / キュー不可) ことを正直に伝える。成功を偽らない。
+    // この通知だけは子供画面でも出す (成功演出を出さない代わりに「保存できなかった」と知らせるため)。
+    // 文言は最小実装。設定さんが後で調整しやすいよう短く保つ。
+    private void ShowCannotSaveMessage()
+    {
+        var gs = GameStateService.Instance;
+        bool isChild = gs != null && gs.CurrentMode == GameStateService.GameMode.Child;
+        string msg = isChild
+            ? "いまは ほぞんできないよ。ネットに つないでね"
+            : "保存できませんでした（送信待ちが上限）。接続後にもう一度お試しください";
+        AppFlowController.Instance?.ShowToast(msg, allowInChild: true);
     }
 
     private void ShowCooldownToastIfAdult(DateTimeOffset? until, DateTimeOffset now)

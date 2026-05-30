@@ -512,12 +512,16 @@ public class AppFlowController : MonoBehaviour
 
     // ---------- 同期トースト (M5) ----------
 
-    // HabitSyncService から呼ばれる控えめな通知. 子供画面では出さない (:695) =
+    // HabitSyncService から呼ばれる控えめな通知. 通常は子供画面では出さない (:695) =
     // 大人モード時のみ表示し, 一定時間で自動的に消える.
-    public void ShowSyncToast(string msg)
+    public void ShowSyncToast(string msg) => ShowToast(msg, allowInChild: false);
+
+    // allowInChild=true は finding 1 の「保存できなかった」通知専用 (成功演出を出さない代わりに
+    // 子供にも事実を伝えるため子供画面でも表示する). 通常の同期トーストは子供画面では出さない (:695).
+    public void ShowToast(string msg, bool allowInChild)
     {
         var gs = GameStateService.Instance;
-        if (gs != null && gs.CurrentMode != GameStateService.GameMode.Adult)
+        if (!allowInChild && gs != null && gs.CurrentMode != GameStateService.GameMode.Adult)
         {
             return; // 子供画面では出さない
         }

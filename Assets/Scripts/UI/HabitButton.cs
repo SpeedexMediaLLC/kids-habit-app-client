@@ -22,11 +22,8 @@ public class HabitButton : MonoBehaviour
     public void OnClick()
     {
         Debug.Log("habit button pressed");
-        // 即演出 (光る/サイズアップ/音) ← 体験のため通信を待たない (§5.1-5)。
-        if (pressEffectPlayer != null)
-        {
-            pressEffectPlayer.Play();
-        }
+        // 演出は「保存できたか」に応じて再生する (finding 1: 上限到達などで保存できないときは
+        // 成功演出を出さない=成功を偽らない)。判定はローカルで同期的に終わるので即時性は保たれる。
         RecordPress();
     }
 
@@ -54,10 +51,24 @@ public class HabitButton : MonoBehaviour
         var sync = HabitSyncService.Instance;
         if (sync != null)
         {
-            sync.RequestRecord(memberGuid, habitGuid);
+            // RequestRecord は同期的にローカル窓チェック + enqueue を行い、成功演出を出してよいか返す。
+            // 上限到達などで保存できないときだけ false (演出を出さない)。通信は待たない (§5.1-5)。
+            bool playEffect = sync.RequestRecord(memberGuid, habitGuid);
+            if (playEffect) PlayPressEffect();
             return;
         }
+        // 検証用シーン (HabitSync 不在): 従来どおり即演出 + 直接 RPC。
+        PlayPressEffect();
         LegacyDirectAsync(memberGuid, habitGuid).Forget();
+    }
+
+    private void PlayPressEffect()
+    {
+        // 即演出 (光る/サイズアップ/音) ← 体験のため通信を待たない (§5.1-5)。
+        if (pressEffectPlayer != null)
+        {
+            pressEffectPlayer.Play();
+        }
     }
 
     // 検証用シーン向けの従来経路 (オフラインキューを通さない直接 RPC)。

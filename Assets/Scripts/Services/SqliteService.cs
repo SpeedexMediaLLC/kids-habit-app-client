@@ -123,26 +123,37 @@ public static class SqliteService
         return until;
     }
 
-    // 新規 pending を投入する。1 habit 1 pending + 50 件上限を満たさなければ false。
-    public static bool TryEnqueue(string habitId, string memberId, string clientEventId, DateTimeOffset? createdUtc)
+    // pending 投入結果。呼び出し側はこれで「成功演出を出してよいか」「正直に弾くか」を判断する。
+    public enum EnqueueResult
+    {
+        Enqueued,       // 新規 pending を保存した
+        AlreadyPending, // 同一 habit に未送信 pending が既にある (データ損失ではない)
+        CapReached,     // 全体 50 件上限に到達 = 保存できない (進捗が失われるので成功を偽らない)
+        Unavailable,    // SQLite 不可
+    }
+
+    // 新規 pending を投入する (§5.4.2: 1 habit 1 pending + 全体 50 件上限)。
+    // 上限時の方針 = reject-newest: 最古を破棄 (eviction) せず新規を弾く。eviction は確定済みの古い
+    // 進捗を失うため採らない。CapReached のとき呼び出し側は成功演出も「あとで送る」表示も出さず正直に弾く。
+    public static EnqueueResult TryEnqueue(string habitId, string memberId, string clientEventId, DateTimeOffset? createdUtc)
     {
         EnsureInitialized();
-        if (!Available) return false;
+        if (!Available) return EnqueueResult.Unavailable;
         try
         {
             int totalPending = _db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM PendingLog WHERE Status = 'pending'");
             if (totalPending >= MaxPending)
             {
-                Debug.LogWarning($"[SqliteService] pending cap reached ({totalPending}/{MaxPending}); drop enqueue");
-                return false;
+                Debug.LogWarning($"[SqliteService] pending cap reached ({totalPending}/{MaxPending}); reject newest (no eviction)");
+                return EnqueueResult.CapReached;
             }
             int habitPending = _db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM PendingLog WHERE HabitId = ? AND Status = 'pending'", habitId);
             if (habitPending > 0)
             {
                 Debug.Log($"[SqliteService] habit already has pending; skip enqueue habit={habitId}");
-                return false;
+                return EnqueueResult.AlreadyPending;
             }
 
             string iso = createdUtc.HasValue
@@ -157,13 +168,13 @@ public static class SqliteService
                 CreatedServerUtc = iso,
                 UpdatedServerUtc = iso,
             });
-            return true;
+            return EnqueueResult.Enqueued;
         }
         catch (Exception ex)
         {
-            // partial UNIQUE index 違反 (同時 pending) 等は想定内 → false で握る。
-            Debug.LogWarning($"[SqliteService] enqueue failed (likely unique constraint): {ex.Message}");
-            return false;
+            // partial UNIQUE index 違反 = 同一 habit に pending が既にある (想定内・データ損失でない)。
+            Debug.LogWarning($"[SqliteService] enqueue hit constraint (treat as already-pending): {ex.Message}");
+            return EnqueueResult.AlreadyPending;
         }
     }
 
@@ -182,6 +193,24 @@ public static class SqliteService
             return new List<PendingLog>();
         }
     }
+
+    // 送信待ち件数 (finding 2: オンライン継続中のバックオフ再送の判定 / flush 後のバックオフ調整用)。
+    public static int PendingCount()
+    {
+        EnsureInitialized();
+        if (!Available) return 0;
+        try
+        {
+            return _db.ExecuteScalar<int>("SELECT COUNT(*) FROM PendingLog WHERE Status = 'pending'");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[SqliteService] PendingCount failed: {ex.Message}");
+            return 0;
+        }
+    }
+
+    public static bool HasPending() => PendingCount() > 0;
 
     public static void MarkSynced(int id, string updatedUtcIso) => SetStatus(id, PendingLog.StatusSynced, updatedUtcIso);
     public static void MarkRejected(int id, string updatedUtcIso) => SetStatus(id, PendingLog.StatusRejected, updatedUtcIso);
