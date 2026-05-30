@@ -47,6 +47,11 @@ public class HabitSyncService : MonoBehaviour
     private float _retryAccum;
     private float _retryIntervalSec = RetryMinSec;
 
+    // cross-session ガード (安いガード・review high): キューの持ち主 (認証ユーザー id) を 1 値だけ
+    // PlayerPrefs に保持する。PendingLog のスキーマは変えない。フルの owner-scoped 化 (PendingLog に
+    // owner/family 列 + マイグレーション) は別タスク (DECISIONS §4.13 follow-up)。
+    private const string QueueOwnerPrefKey = "m5_queue_owner";
+
     private enum FlushStep { Continue, StopRetry, StopTerminal }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -166,6 +171,10 @@ public class HabitSyncService : MonoBehaviour
             }
         }
 
+        // cross-session ガード: キューの持ち主を現在のユーザーに揃える。別アカウント/不明の残存 pending は
+        // ここでクリアされ、別セッションで他人の記録が replay されない。新規 pending は現ユーザー所有になる。
+        ReconcileQueueOwner(CurrentUserId());
+
         // 連打/重複防止 (§5.4.2/§5.4.3): 未送信 pending or 10 分窓内の成功/却下があれば新規を作らない。
         // 子供画面では演出だけ流す (= 体験を壊さない・データ損失なし)。大人モードは控えめにクールダウン表示。
         if (haveTime && SqliteService.HasBlockingEntry(habit, nowUtc, out var cooldownUntil))
@@ -218,6 +227,16 @@ public class HabitSyncService : MonoBehaviour
         _flushing = true;
         try
         {
+            // cross-session ガード: セッションが無ければ送らない (誤った JWT で他人の記録を送らない)。
+            // 現在のユーザーにキュー持ち主を揃え、別アカウント/不明の残存 pending はクリアしてから送る。
+            string uid = CurrentUserId();
+            if (string.IsNullOrEmpty(uid))
+            {
+                Debug.Log($"[HabitSync] flush ({reason}) skipped: no session");
+                return;
+            }
+            ReconcileQueueOwner(uid);
+
             var pending = SqliteService.GetPending();
             if (pending.Count == 0) return;
             Debug.Log($"[HabitSync] flush ({reason}) count={pending.Count}");
@@ -412,4 +431,32 @@ public class HabitSyncService : MonoBehaviour
 
     private static string NowIso() =>
         (ServerClock.TryNowUtc(out var n) ? n : default).ToString("o", CultureInfo.InvariantCulture);
+
+    // ---------- cross-session ガード (安いガード・review high) ----------
+
+    private static string CurrentUserId()
+    {
+        return SupabaseService.Client?.Auth?.CurrentSession?.User?.Id ?? "";
+    }
+
+    // キューの持ち主を現在のユーザーに揃える。持ち主が違う/不明なのに pending が残っていれば、
+    // それは別アカウント (or 旧データ) の記録なのでローカルから破棄してから持ち主を更新する。
+    // → 別アカウント B のセッションで A の pending が replay される事故を防ぐ。
+    // 設計メモ: ログアウト単体ではクリアしない (持ち主は A のまま) ため「A ログアウト → A 再ログイン」は
+    //   持ち主一致で pending 保持＆通常同期され無駄に捨てない。「B が別アカウントでログイン」のときだけ
+    //   クリアされる。cross-session replay 自体が起きないので invalid_habit の terminal 扱いは現状維持でよい。
+    //   A の未同期分を残して A 再同期まで保持するフル対応は owner-scoped follow-up (DECISIONS §4.13)。
+    private void ReconcileQueueOwner(string currentUserId)
+    {
+        if (string.IsNullOrEmpty(currentUserId)) return; // セッション無し → 触らない
+        string owner = PlayerPrefs.GetString(QueueOwnerPrefKey, "");
+        if (owner == currentUserId) return; // 同一の持ち主 → キュー保持
+        if (SqliteService.HasPending())
+        {
+            Debug.Log($"[HabitSync] queue owner changed ('{owner}' -> '{currentUserId}'); clearing stale pending");
+            SqliteService.ClearAll();
+        }
+        PlayerPrefs.SetString(QueueOwnerPrefKey, currentUserId);
+        PlayerPrefs.Save();
+    }
 }
