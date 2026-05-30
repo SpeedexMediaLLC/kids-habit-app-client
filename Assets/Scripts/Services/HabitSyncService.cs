@@ -315,6 +315,17 @@ public class HabitSyncService : MonoBehaviour
                 throw new Exception("DebugForceSendFailure (test): simulated transient server failure");
             }
             var result = await ApiService.RecordHabitAsync(member, habit, clientEventId);
+            // cross-session ガード (final review #2 high): RPC await をまたいで認証ユーザーが変わって/消えて
+            // いたら、旧ユーザーの応答を新セッションに適用しない。最重要の await はこのネットワーク呼び出しなので、
+            // 適用直前に再確認する (送信直前チェックだけでは await 中の変化を拾えない)。これを欠くと旧応答で
+            // ApplyResult が走り、MarkSynced/MarkRejected や deletion_pending/not_authorized の terminal
+            // アクション (ClearAll + 削除予約画面 / ログアウト) を新セッションに誤誘発しうる。結果を捨て pending の
+            // まま保留し、後段の FlushAsync reconcile が現 owner で pending のクリア/保持を担当する (DECISIONS §4.13)。
+            if (CurrentUserId() != expectedUid)
+            {
+                Debug.Log($"[HabitSync] auth user changed during send id={row.Id} (expected '{expectedUid}'); discard result, keep pending");
+                return FlushStep.StopRetry;
+            }
             return ApplyResult(row, result);
         }
         catch (Exception ex)
@@ -405,7 +416,16 @@ public class HabitSyncService : MonoBehaviour
         try
         {
             if (!Guid.TryParse(member, out var m) || !Guid.TryParse(habit, out var h)) return;
+            // cross-session ガード (final review #2): direct 経路も RPC await をまたいだ認証変化で旧ユーザーの
+            // 応答を新セッションに適用しない (deletion_pending/not_authorized の terminal アクションや stage 反映を
+            // 旧応答で誘発しない)。送信時の uid を控え、適用直前に再確認して変化していれば結果を捨てる。
+            string expectedUid = CurrentUserId();
             var result = await ApiService.RecordHabitAsync(m, h, Guid.NewGuid());
+            if (CurrentUserId() != expectedUid)
+            {
+                Debug.Log("[HabitSync] auth user changed during direct send; discard result");
+                return;
+            }
             switch (result.ResultCode)
             {
                 case "recorded": ApplyCreatureStage(result); break;
