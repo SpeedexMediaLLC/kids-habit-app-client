@@ -33,7 +33,7 @@ public class HabitSyncService : MonoBehaviour
 
     private const float PollInterval = 3f;
     private float _pollTimer;
-    private NetworkReachability _lastReachability;
+    private bool _lastOnline;
     private bool _flushing;
 
     private enum FlushStep { Continue, StopRetry, StopTerminal }
@@ -58,7 +58,7 @@ public class HabitSyncService : MonoBehaviour
     {
         Instance = this;
         SqliteService.EnsureInitialized();
-        _lastReachability = Application.internetReachability;
+        _lastOnline = IsOnline;
     }
 
     private void OnDestroy()
@@ -79,12 +79,14 @@ public class HabitSyncService : MonoBehaviour
         if (_pollTimer < PollInterval) return;
         _pollTimer = 0f;
 
-        var now = Application.internetReachability;
-        if (now != _lastReachability)
+        // オンライン状態の遷移を監視する。IsOnline は internetReachability に加え DebugForceOffline も
+        // 反映するため、実機の機内モード解除と Editor 検証時のフラグ解除の両方で復活を拾える (:693)。
+        bool online = IsOnline;
+        if (online != _lastOnline)
         {
-            Debug.Log($"[HabitSync] reachability {_lastReachability} -> {now}");
-            _lastReachability = now;
-            if (IsOnline) TryFlush("reachability-recovered");
+            Debug.Log($"[HabitSync] online {_lastOnline} -> {online}");
+            _lastOnline = online;
+            if (online) TryFlush("online-recovered");
         }
     }
 
