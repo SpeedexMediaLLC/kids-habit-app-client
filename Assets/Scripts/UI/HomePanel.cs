@@ -72,6 +72,7 @@ public class HomePanel : MonoBehaviour
         {
             var client = SupabaseService.Client;
             var membersResp = await client.From<MemberModel>().Get();
+            ServerClock.FeedFromHttp(membersResp?.ResponseMessage); // M5: サーバー時刻 anchor を供給
             var creaturesResp = await client.From<CreatureModel>().Get();
             var habitsResp = await client.From<HabitModel>().Get();
             var logsResp = await client.From<HabitLogModel>().Get();
@@ -324,13 +325,27 @@ public class HomePanel : MonoBehaviour
         lr.anchorMin = Vector2.zero; lr.anchorMax = Vector2.one;
         lr.offsetMin = new Vector2(20, 0); lr.offsetMax = new Vector2(-20, 0);
         var t = label.AddComponent<Text>();
-        t.text = habit.Title;
+        t.text = habit.Title + CooldownSuffix(habit);
         t.font = _font;
         t.fontSize = 30;
         t.color = Color.white;
         t.alignment = TextAnchor.MiddleLeft;
 
         _habitRowBg[habit.Id] = img;
+    }
+
+    // 大人モードのクールダウン残時間表示 (§5.4.3, :695). ローカル 10 分窓内なら habit 行に残りを併記する.
+    // 子供モードでは Home 自体が非表示 (AppFlowController.OnGameModeChanged) なので「子供画面では出さない」も満たす.
+    // 時刻は ServerClock (壁時計非依存). 一覧再構築時のスナップショット (Refresh / メンバー切替 / 設定を閉じた時に更新).
+    private string CooldownSuffix(HabitModel habit)
+    {
+        if (!ServerClock.TryNowUtc(out var now)) return "";
+        var until = SqliteService.GetCooldownUntil(habit.Id.ToString(), now);
+        if (until == null) return "";
+        var remain = until.Value - now;
+        if (remain <= TimeSpan.Zero) return "";
+        int mins = Mathf.CeilToInt((float)remain.TotalMinutes);
+        return $"  （クールダウン中 あと約 {mins} 分）";
     }
 
     private void OnSelectHabit(HabitModel habit)
