@@ -151,6 +151,18 @@ public class HabitSyncService : MonoBehaviour
         string member = memberId.ToString();
         bool haveTime = ServerClock.TryNowUtc(out var nowUtc);
 
+        // cross-session ガード (finding high): 認証ユーザーが取れない状態 (起動時のセッション復元が非同期 /
+        // 未ログイン) では「保存できない」。owner を記録できないまま pending を作ると、後の認証済み flush で
+        // owner 空+pending=stale 判定でクリアされ偽の成功になる。queue でも direct でも同じなので、ここで
+        // 非空ユーザーを必須にし、取れなければ正直に弾く (pending を作らない・演出も出さない)。
+        string ownerId = CurrentUserId();
+        if (string.IsNullOrEmpty(ownerId))
+        {
+            Debug.LogWarning("[HabitSync] no authenticated user; reject press (no enqueue / no success effect)");
+            ShowCannotSaveMessage();
+            return false;
+        }
+
         // SQLite が使えない稀な環境 (ネイティブ未配置等)。
         if (!SqliteService.Available)
         {
@@ -173,7 +185,7 @@ public class HabitSyncService : MonoBehaviour
 
         // cross-session ガード: キューの持ち主を現在のユーザーに揃える。別アカウント/不明の残存 pending は
         // ここでクリアされ、別セッションで他人の記録が replay されない。新規 pending は現ユーザー所有になる。
-        ReconcileQueueOwner(CurrentUserId());
+        ReconcileQueueOwner(ownerId);
 
         // 連打/重複防止 (§5.4.2/§5.4.3): 未送信 pending or 10 分窓内の成功/却下があれば新規を作らない。
         // 子供画面では演出だけ流す (= 体験を壊さない・データ損失なし)。大人モードは控えめにクールダウン表示。
@@ -243,8 +255,19 @@ public class HabitSyncService : MonoBehaviour
             foreach (var row in pending)
             {
                 if (!IsOnline) break;
-                var step = await SendOneAsync(row);
+                // cross-session ガード (finding medium): await をまたいで認証ユーザーが変わって/消えていないか
+                // 毎回再確認する。旧スナップショットの後続行を新セッションで送らない。SendOneAsync 内でも送信直前に
+                // 同じ uid で再確認する (二重ガード)。変化時はループを抜け、後段で新ユーザーの reconcile を走らせる。
+                if (CurrentUserId() != uid) break;
+                var step = await SendOneAsync(row, uid);
                 if (step == FlushStep.StopRetry || step == FlushStep.StopTerminal) break;
+            }
+            // flush 中に認証が変わっていたら、新ユーザーで持ち主を整合させる (旧ユーザーの残存 pending はクリア。
+            // 新ユーザーが空=ログアウト中なら reconcile は no-op で旧キューは保持＝同一ユーザー再ログインで再同期)。
+            if (CurrentUserId() != uid)
+            {
+                Debug.Log($"[HabitSync] auth user changed during flush (was '{uid}'); reconcile under current");
+                ReconcileQueueOwner(CurrentUserId());
             }
             SqliteService.Prune(ServerClock.TryNowUtc(out var n) ? n : (DateTimeOffset?)null);
         }
@@ -264,7 +287,7 @@ public class HabitSyncService : MonoBehaviour
         }
     }
 
-    private async UniTask<FlushStep> SendOneAsync(PendingLog row)
+    private async UniTask<FlushStep> SendOneAsync(PendingLog row, string expectedUid)
     {
         if (!Guid.TryParse(row.MemberId, out var member)
             || !Guid.TryParse(row.HabitId, out var habit)
@@ -273,6 +296,15 @@ public class HabitSyncService : MonoBehaviour
             Debug.LogError($"[HabitSync] bad row ids id={row.Id}; mark invalid");
             SqliteService.MarkInvalid(row.Id, NowIso());
             return FlushStep.Continue;
+        }
+
+        // cross-session ガード (finding medium): 送信直前に認証ユーザーが flush 開始時の expected と一致するか
+        // 再確認する。await をまたいでサインアウト/イン等が起きていたら、旧ユーザー宛の行を新セッションで送らない
+        // (pending のまま保留・FlushAsync 後段の reconcile が新ユーザーで整合させる)。
+        if (CurrentUserId() != expectedUid)
+        {
+            Debug.Log($"[HabitSync] skip send id={row.Id}: auth user changed (expected '{expectedUid}'); keep pending");
+            return FlushStep.StopRetry;
         }
 
         try
