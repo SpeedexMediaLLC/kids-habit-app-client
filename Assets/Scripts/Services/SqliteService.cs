@@ -37,6 +37,11 @@ public static class SqliteService
     // 初期化失敗時の原因 (型 + メッセージ)。fallback ログ等の診断用。成功時は null。
     public static string InitError { get; private set; }
 
+    // 検証用 (review finding): prechecks 通過後に _db.Insert が失敗するケースを模擬する。
+    // true の間 TryEnqueue の insert を擬似失敗させ Failed を返す (= 成功演出が出ないことの確認用)。
+    // 既定 false・UI 無し・本番経路に影響しない。
+    public static bool DebugForceInsertFailure = false;
+
     public static void EnsureInitialized()
     {
         if (_initTried) return;
@@ -127,9 +132,10 @@ public static class SqliteService
     public enum EnqueueResult
     {
         Enqueued,       // 新規 pending を保存した
-        AlreadyPending, // 同一 habit に未送信 pending が既にある (データ損失ではない)
+        AlreadyPending, // 同一 habit に未送信 pending が既にある (UNIQUE 制約 / pending 既存・データ損失ではない)
         CapReached,     // 全体 50 件上限に到達 = 保存できない (進捗が失われるので成功を偽らない)
-        Unavailable,    // SQLite 不可
+        Unavailable,    // SQLite 不可 (init 失敗)
+        Failed,         // prechecks 通過後の insert/storage 失敗 (DB full/locked/corrupt/schema 等・保存できていない)
     }
 
     // 新規 pending を投入する (§5.4.2: 1 habit 1 pending + 全体 50 件上限)。
@@ -159,6 +165,11 @@ public static class SqliteService
             string iso = createdUtc.HasValue
                 ? createdUtc.Value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)
                 : "";
+            if (DebugForceInsertFailure)
+            {
+                // 検証用: prechecks 通過後に保存が失敗するケースを模擬 (review finding の確認)。
+                throw new Exception("DebugForceInsertFailure (test): simulated storage write failure after prechecks");
+            }
             _db.Insert(new PendingLog
             {
                 HabitId = habitId,
@@ -170,11 +181,18 @@ public static class SqliteService
             });
             return EnqueueResult.Enqueued;
         }
+        catch (SQLiteException ex) when (ex.Result == SQLite3.Result.Constraint)
+        {
+            // partial UNIQUE 制約違反のみ = 同一 habit に pending が既にある (並行 insert 等・データ損失でない)。
+            Debug.LogWarning($"[SqliteService] enqueue unique-constraint -> already pending: {ex.Message}");
+            return EnqueueResult.AlreadyPending;
+        }
         catch (Exception ex)
         {
-            // partial UNIQUE index 違反 = 同一 habit に pending が既にある (想定内・データ損失でない)。
-            Debug.LogWarning($"[SqliteService] enqueue hit constraint (treat as already-pending): {ex.Message}");
-            return EnqueueResult.AlreadyPending;
+            // prechecks 通過後の insert/query/storage 実失敗 (DB full/locked/corrupt/schema 不一致等)。
+            // 保存できていない → AlreadyPending に丸めず Failed を返す (呼び出し側が成功演出を抑止し honest 通知)。
+            Debug.LogError($"[SqliteService] enqueue FAILED (not persisted): {ex.GetType().Name}: {ex.Message}");
+            return EnqueueResult.Failed;
         }
     }
 

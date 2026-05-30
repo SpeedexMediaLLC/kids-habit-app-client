@@ -193,8 +193,11 @@ public class HabitSyncService : MonoBehaviour
                 return true;
 
             case SqliteService.EnqueueResult.CapReached:
+            case SqliteService.EnqueueResult.Failed:
+            case SqliteService.EnqueueResult.Unavailable:
             default:
-                // 上限到達 (or 不可) で保存できない = 進捗が失われる → 成功を偽らず正直に弾く (演出を出さない)。
+                // 上限到達 / 保存失敗 (insert/storage) / SQLite 不可 = いずれも保存できていない →
+                // 成功を偽らず正直に弾く (演出を出さない・honest 通知のみ)。データ損失を隠さない。
                 Debug.LogWarning($"[HabitSync] cannot save press (result={enq}); reject without success effect");
                 ShowCannotSaveMessage();
                 return false;
