@@ -82,3 +82,7 @@ desktop.ini
 # === Editor ===
 *.swp
 *~
+
+# Unity crash/auto-save recovery artifacts (editor が自動生成・プロジェクト内容ではない)
+/[Aa]ssets/_[Rr]ecovery/
+/[Aa]ssets/_[Rr]ecovery.meta
